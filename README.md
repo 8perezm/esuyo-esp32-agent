@@ -1,15 +1,19 @@
 # ESP32 Agent
 
-> Give any ESP32 a chat brain: talk to it from your browser, let it flip pins, read sensors, remember facts, and update itself over WiFi.
+> A chat harness on your ESP32 — you can ask it to do things connected to the device.
 
-ESP32 Agent turns a $5 ESP32 into a tiny AI assistant you open like a website — no app to install, no cloud account on the device. Connect it to your WiFi once from your phone, point it at any OpenAI-compatible chat endpoint, and ask it to check its health, blink an LED, scan networks, remember your preferences, or look something up on the web.
+You can ask it to for example "Blink the light three times." "Is the soil dry?" "Remember that I like my workshop at 21 degrees." "What's in the news today?" It listens, figures out what you mean, uses its pins and sensors to check or do something, and answers back — like texting a handy friend who happens to live inside your electronics.
 
-It is also a starting point. If you want to build your own ESP32 application with an LLM inside — a greenhouse monitor, a garage helper, a classroom demo — flash this first, play with it for ten minutes, then fork the code and make it yours. The heavy lifting (WiFi portal, chat UI, tool loop, memory, over-the-air updates) is already done.
+That's what this project is: it gives your ESP32 ears, hands, and a memory. The understanding part comes from whatever AI chat service you already use. 
+
+Use it as a starting point for you to further build your ideas "what if my plant pot could answer questions?".
+
+It's deliberately kept small so you can own it and make it yours. Flash it, play with it for ten minutes, then use it as the base for your own project, a greenhouse monitor, a garage door buddy, a classroom demo. The boring plumbing is already done, so you can spend your time on the fun part: what you want yours to do.
 
 ## Features
 
 - **Phone-friendly setup:** first boot creates an open `ESP32-Agent-Setup` network with a captive portal. Pick your home WiFi and paste your AI endpoint without touching code.
-- **Chat in your browser:** fast streaming replies with a "Thinking" view, chat history, and a model picker at `http://esp32-agent.local/`.
+- **Chat in your browser:** fast streaming replies with a "Thinking" view, chat history, and a model picker.
 - **It can touch hardware:** ask it to report heap/uptime/WiFi, read or write GPIO, read analog sensors, scan nearby networks, or blink a pin.
 - **It remembers:** tell it "my plant is a basil" and it saves the fact to onboard flash, recalls it next week, and shows it on the memory page.
 - **It can look things up:** ask for fresh info and it fetches web pages as plain text (no JavaScript, no logins).
@@ -74,7 +78,7 @@ Handy pages (also linked from `/setup`):
 
 | Page | Address | Use |
 |------|---------|-----|
-| Chat | `http://esp32-agent.local/` | Talk to the device |
+| Chat | `/` | Talk to the device |
 | Setup hub | `/setup` | Links to everything below |
 | WiFi | `/wifi` | Change networks (reboots) |
 | Agent | `/agent` | Change endpoint / key / model (no reboot) |
