@@ -213,6 +213,107 @@ void handleSaveAgent() {
   // No reboot: WiFi stays connected, / keeps working.
 }
 
+// Proxies the configured endpoint's OpenAI-style model list so the browser
+// picker shows what YOUR endpoint serves (works with any provider/app).
+void handleGetModels() {
+  if (!cfgEndpoint.length()) {
+    server.send(400, "application/json", "{\"error\":\"agent endpoint not configured. Open /agent.\"}");
+    return;
+  }
+  if (WiFi.status() != WL_CONNECTED) {
+    server.send(503, "application/json", "{\"error\":\"ESP32 has no WiFi. Open /wifi.\"}");
+    return;
+  }
+  String url = modelsUrl(cfgEndpoint);
+  bool https = url.startsWith("https://");
+  HTTPClient http;
+  WiFiClientSecure secure;
+  WiFiClient plain;
+  http.setTimeout(15000);
+  if (https) {
+    secure.setInsecure();
+    secure.setTimeout(15000);
+    if (!http.begin(secure, url)) { server.send(502, "application/json", "{\"error\":\"upstream begin failed\"}"); return; }
+  } else {
+    plain.setTimeout(15000);
+    if (!http.begin(plain, url)) { server.send(502, "application/json", "{\"error\":\"upstream begin failed\"}"); return; }
+  }
+  http.addHeader("Accept", "application/json");
+  if (cfgApiKey.length()) http.addHeader("Authorization", "Bearer " + cfgApiKey);
+  http.useHTTP10(true);
+  http.setReuse(false);
+  int code = http.GET();
+  if (code <= 0) {
+    String e = http.errorToString(code);
+    http.end();
+    server.send(502, "application/json", "{\"error\":\"upstream request failed: " + e + "\"}");
+    return;
+  }
+  if (code < 200 || code >= 300) {
+    String resp = http.getString();
+    http.end();
+    resp.replace("\"", "'");
+    if (resp.length() > 300) resp = resp.substring(0, 300);
+    server.send(502, "application/json", "{\"error\":\"upstream HTTP " + String(code) + ": " + resp + "\"}");
+    return;
+  }
+  JsonDocument out;
+  JsonArray arr = out["models"].to<JsonArray>();
+  // Model catalogs (400+ entries with pricing) are far too big to hold in RAM,
+  // so scan the stream for "id" values and stop after 60 — flat ~1KB RAM.
+  WiFiClient* st = http.getStreamPtr();
+  String win;
+  win.reserve(320);
+  bool inData = false;
+  size_t total = 0;
+  unsigned long deadline = millis() + 15000;
+  uint8_t buf[256];
+  while ((int)arr.size() < 60 && total < 98304 && (long)(millis() - deadline) < 0) {
+    if (!st->available()) {
+      if (!http.connected()) break;
+      delay(5);
+      continue;
+    }
+    int n = st->read(buf, sizeof(buf));
+    if (n <= 0) { delay(5); continue; }
+    total += (size_t)n;
+    for (int i = 0; i < n; i++) {
+      win += (char)buf[i];
+      if (win.length() > 300) win.remove(0, win.length() - 300);
+    }
+    if (!inData) {
+      if (win.indexOf("\"data\"") < 0) continue;
+      inData = true;
+    }
+    int p;
+    while ((p = win.indexOf("\"id\"")) >= 0) {
+      int q = p + 4;
+      while (q < (int)win.length() && (win[q] == ' ' || win[q] == '\t')) q++;
+      if (q >= (int)win.length() || win[q] != ':') break;  // need more bytes
+      q++;
+      while (q < (int)win.length() && (win[q] == ' ' || win[q] == '\t')) q++;
+      if (q >= (int)win.length() || win[q] != '"') break;  // need more bytes
+      int e = win.indexOf('"', q + 1);
+      if (e < 0) break;  // value split across chunks, wait for more
+      String id = win.substring(q + 1, e);
+      win.remove(0, e + 1);
+      if (id.length() && id.length() <= 160) {
+        JsonObject o = arr.add<JsonObject>();
+        o["id"] = id;
+        if ((int)arr.size() >= 60) break;
+      }
+    }
+  }
+  http.end();
+  if (arr.size() == 0) {
+    server.send(502, "application/json", "{\"error\":\"no models parsed from endpoint\"}");
+    return;
+  }
+  out["count"] = (int)arr.size();
+  String s; serializeJson(out, s);
+  server.send(200, "application/json", s);
+}
+
 void handleGetConfig() {
   JsonDocument d;
   d["wifi_ssid"] = cfgSsid;
@@ -258,7 +359,7 @@ void handleSaveConfig() {
 }
 
 void handleDebugRaw() {
-  // Uses the ESP's saved key to hit OpenRouter and returns the RAW upstream
+  // Uses the ESP's saved key to hit the saved endpoint and returns the RAW upstream
   // body (truncated) so we can see the exact JSON shape without exposing the key.
   String msg = server.hasArg("message") ? server.arg("message") : "Reply with just OK";
   if (msg.length() > 500) msg = msg.substring(0, 500);
@@ -647,6 +748,7 @@ void setupRoutes() {
   server.on("/api/wifi", HTTP_POST, handleSaveWifi);
   server.on("/api/agent", HTTP_GET, handleGetAgent);
   server.on("/api/agent", HTTP_POST, handleSaveAgent);
+  server.on("/api/models", HTTP_GET, handleGetModels);
   server.on("/api/config", HTTP_GET, handleGetConfig);
   server.on("/api/config", HTTP_POST, handleSaveConfig);
   server.on("/api/chat", HTTP_POST, handleChat);

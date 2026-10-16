@@ -26,4 +26,5 @@ void saveConfig(const String& ssid, const String& pass,
 void saveWifiOnly(const String& ssid, const String& pass);
 void saveAgentOnly(const String& endpoint, const String& key, const String& model);
 String chatCompletionsUrl(const String& base);
+String modelsUrl(const String& base);
 String maskedKey(const String& k);

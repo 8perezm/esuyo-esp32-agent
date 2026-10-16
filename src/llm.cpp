@@ -329,9 +329,9 @@ String callLLM(const String& userMsg, JsonArray history, String* outReasoning) {
   Serial.printf("[llm] choices=%d mem=%u\n", (int)choices.size(), (unsigned)res.memoryUsage());
   Serial.printf("[llm] msgsize=%d\n", (int)res["choices"][0]["message"].size());
   const char* content = res["choices"][0]["message"]["content"] | (const char*)nullptr;
-  // Provider variants: OpenRouter/Together use several field names.
+  // Provider variants: some gateways use different field names.
   const char* reasoningCC = res["choices"][0]["message"]["reasoning_content"] | (const char*)nullptr;  // DeepSeek native
-  const char* reasoning = res["choices"][0]["message"]["reasoning"] | (const char*)nullptr;            // OpenRouter Together wrapper
+  const char* reasoning = res["choices"][0]["message"]["reasoning"] | (const char*)nullptr;            // gateway wrapper variant
   const char* rdText = res["choices"][0]["message"]["reasoning_details"][0]["text"] | (const char*)nullptr;
   const char* text = res["choices"][0]["text"] | (const char*)nullptr;
   const char* errMsg = res["error"]["message"] | (const char*)nullptr;

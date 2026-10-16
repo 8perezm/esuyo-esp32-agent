@@ -61,6 +61,16 @@ String chatCompletionsUrl(const String& base) {
   return u + "/chat/completions";
 }
 
+// Same normalization, but for the OpenAI-style model list (GET {base}/models).
+String modelsUrl(const String& base) {
+  String u = base;
+  u.trim();
+  while (u.endsWith("/")) u.remove(u.length() - 1);
+  const String suffix = "/chat/completions";
+  if (u.endsWith(suffix)) u.remove(u.length() - suffix.length());
+  return u + "/models";
+}
+
 String maskedKey(const String& k) {
   if (k.length() <= 8) return "****";
   return k.substring(0, 4) + "****" + k.substring(k.length() - 2);

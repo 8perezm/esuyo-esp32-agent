@@ -60,8 +60,23 @@ details.think summary{cursor:pointer;font-weight:600;font-size:12px}
 #status{font-size:12px;opacity:.7;padding:0 14px 8px;text-align:center}
 .cursor::after{content:'▍';animation:blink 0.8s infinite}
 @keyframes blink{50%{opacity:0}}
-</style></head><body>
-<header><h1><a href="/" style="color:inherit">Agent</a></h1><nav><a href="/">Chat</a><a href="/functions">Functions</a><a href="/docs">Docs</a><a href="/setup">Setup</a><a href="/update">Firmware</a></nav></header>
+header nav{display:flex;align-items:center}
+#themebtn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;margin-left:10px;border:1px solid #8884;border-radius:8px;background:transparent;color:inherit;cursor:pointer;padding:0;flex:none}
+#themebtn:hover{background:#8882}
+#themebtn svg{width:16px;height:16px}
+#themebtn .sun{display:none}
+html[data-theme="dark"] #themebtn .sun{display:block}
+html[data-theme="dark"] #themebtn .moon{display:none}
+html[data-theme="light"]{color-scheme:light}
+html[data-theme="dark"]{color-scheme:dark}
+html[data-theme="light"] body{background:#fff;color:#111}
+html[data-theme="dark"] body{background:#0f141b;color:#e6e8ee}
+html[data-theme="dark"] a{color:#8ab4ff}
+html[data-theme="dark"] #card,html[data-theme="dark"] #mpop{background:#161c26;border-color:#ffffff22}
+html[data-theme="dark"] #msearch{background:#1a2230;border-color:#ffffff2a;color:#e6e8ee}
+</style>
+<script>try{var t=localStorage.getItem('agent_theme');if(!t){t=matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'}document.documentElement.dataset.theme=t}catch(e){}</script></head><body>
+<header><h1><a href="/" style="color:inherit">Agent</a></h1><nav><a href="/">Chat</a><a href="/functions">Functions</a><a href="/docs">Docs</a><a href="/setup">Setup</a><a href="/update">Firmware</a><button id="themebtn" type="button" aria-label="Toggle dark mode" title="Toggle dark mode"><svg class="moon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg><svg class="sun" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></button></nav></header>
 <div id="warn"></div>
 <div id="log"><div class="sys">Connected. Ask anything.</div></div>
 <div id="status"></div>
@@ -182,25 +197,14 @@ function syncSend(){const has=inp.value.trim().length>0;send.disabled=!has;send.
 inp.addEventListener('input',()=>{inp.style.height='auto';inp.style.height=Math.min(inp.scrollHeight,200)+'px';syncSend();});
 inp.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();go();}};
 syncSend();
-// --- model picker popup: search + STARRED + OPENROUTER (browser fetches list direct; ESP only stores your pick) ---
+// --- model picker popup: search + STARRED + MODELS (list proxied from your endpoint via /api/models; ESP stores your pick) ---
 const mpill=document.getElementById('mpill'),mpilltxt=document.getElementById('mpilltxt'),
 mpop=document.getElementById('mpop'),msearch=document.getElementById('msearch'),mgroups=document.getElementById('mgroups');
 let MODELS=[];
+let modelsLoaded=false;
 let STARRED=[];
-try{STARRED=JSON.parse(localStorage.getItem('or_starred')||'[]');if(!Array.isArray(STARRED))STARRED=[];}catch(e){STARRED=[];}
-function saveStarred(){try{localStorage.setItem('or_starred',JSON.stringify(STARRED));}catch(e){}}
-function m6(v){v=parseFloat(v);if(isNaN(v)||!isFinite(v))return '';return '$'+(v*1e6).toFixed(2);}
-function priceLine(m){
-  const parts=[];
-  if(m[2]!=='')parts.push(m6(m[2])+' in');
-  if(m[3]!=='')parts.push(m6(m[3])+' out');
-  if(m[4]!=='')parts.push(m6(m[4])+' cache');
-  let s=parts.join(' · ');if(s)s+=' /Mtok';
-  const c=+m[5]||0;
-  if(c>=1e6)s+=(s?' • ':'')+(c/1e6).toFixed(1)+'M ctx';
-  else if(c>=1e3)s+=(s?' • ':'')+Math.round(c/1e3)+'k ctx';
-  return s;
-}
+try{STARRED=JSON.parse(localStorage.getItem('agent_starred')||localStorage.getItem('or_starred')||'[]');if(!Array.isArray(STARRED))STARRED=[];}catch(e){STARRED=[];}
+function saveStarred(){try{localStorage.setItem('agent_starred',JSON.stringify(STARRED));}catch(e){}}
 function prettyId(id){
   const p=id.split('/');
   const cap=s=>s.replace(/[-_]+/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
@@ -216,22 +220,20 @@ function setPill(id,silent){
   if(!silent){window._model=id||'';}
 }
 async function loadModels(){
-  try{const c=JSON.parse(localStorage.getItem('or_models')||'null');
-    if(c&&c.t&&Date.now()-c.t<864e5&&c.m&&c.m.length){MODELS=c.m;setPill(window._model,true);return;}}catch(e){}
-  try{const r=await fetch('https://openrouter.ai/api/v1/models');const j=await r.json();
-    MODELS=(j.data||[]).map(m=>[m.id,m.name||'',(m.pricing&&m.pricing.prompt)||'',(m.pricing&&m.pricing.completion)||'',(m.pricing&&m.pricing.input_cache_read)||'',m.context_length||0]);
-    try{localStorage.setItem('or_models',JSON.stringify({t:Date.now(),m:MODELS}));}catch(e){}
-    setPill(window._model,true);
-  }catch(e){}
+  if(modelsLoaded)return;modelsLoaded=true;
+  try{const r=await fetch('/api/models');const j=await r.json();
+    const list=j.models||[];
+    if(list.length){MODELS=list.map(m=>[(m.id||m),'']);setPill(window._model,true);}
+    else if(window._model)MODELS=[[window._model,'']];
+  }catch(e){if(window._model)MODELS=[[window._model,'']];}
 }
-function matchQ(m,toks){const h=(m[0]+' '+m[1]).toLowerCase();return toks.every(t=>h.includes(t));}
+function matchQ(m,toks){const h=(m[0]+' '+(m[1]||'')).toLowerCase();return toks.every(t=>h.includes(t));}
 function rowEl(m){
   const d=document.createElement('div');d.className='mrow';
   const t=document.createElement('div');t.className='mt';
   const n=document.createElement('div');n.className='mn';n.textContent=(m[1]&&m[1]!==m[0])?m[1]:m[0];
   t.appendChild(n);
-  const pl=priceLine(m);
-  if(pl){const p=document.createElement('div');p.className='mp';p.textContent=pl;t.appendChild(p);}
+  if(m[1]&&m[1]!==m[0]){const p=document.createElement('div');p.className='mp';p.textContent=m[0];t.appendChild(p);}
   d.appendChild(t);
   const on=STARRED.includes(m[0]);
   const s=document.createElement('button');s.className='mstar'+(on?' on':'');s.type='button';s.title='Star';
@@ -254,7 +256,7 @@ function renderPopup(){
   const star=MODELS.filter(m=>STARRED.includes(m[0])&&(toks.length?matchQ(m,toks):true)).slice(0,25);
   const main=MODELS.filter(m=>!STARRED.includes(m[0])&&(!toks.length||matchQ(m,toks))).slice(0,60);
   section('STARRED',star);
-  section('OPENROUTER',main);
+  section('MODELS',main);
   if(!star.length&&!main.length){
     const e=document.createElement('div');e.className='msec';e.textContent=toks.length?'No matches':'Loading models…';
     mgroups.appendChild(e);
@@ -263,6 +265,7 @@ function renderPopup(){
 function openPopup(){
   mpop.classList.add('open');mpill.classList.add('open');
   renderPopup();
+  loadModels().then(()=>{if(mpop.classList.contains('open'))renderPopup();});
   setTimeout(()=>msearch.focus(),30);
 }
 function closePopup(){mpop.classList.remove('open');mpill.classList.remove('open');}
@@ -282,8 +285,7 @@ msearch.addEventListener('keydown',e=>{
   if(e.key==='Escape')closePopup();});
 document.addEventListener('click',e=>{if(!document.getElementById('composer').contains(e.target))closePopup();});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closePopup();});
-loadModels();
-</script></body></html>
+</script><script>(function(){var b=document.getElementById('themebtn');if(!b)return;b.addEventListener('click',function(){var h=document.documentElement;var n=h.dataset.theme==='dark'?'light':'dark';h.dataset.theme=n;try{localStorage.setItem('agent_theme',n)}catch(e){}});})();</script></body></html>
 )rawliteral";
 
 static const char SETUP_HTML[] PROGMEM = R"rawliteral(
@@ -300,14 +302,28 @@ a.btn{display:block;text-align:center;margin-top:8px;padding:12px;border-radius:
 a.ghost{background:#444}
 header{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #8884}
 header h1{font-size:16px;margin:0;line-height:1.2}nav{white-space:nowrap}nav a{margin-left:10px;font-size:13px;line-height:1.2}
-.wrap{max-width:800px;margin:0 auto;padding:0 16px 24px}</style></head><body>
-<header><h1><a href="/" style="color:inherit">Agent</a></h1><nav><a href="/">Chat</a><a href="/functions">Functions</a><a href="/docs">Docs</a><a href="/setup">Setup</a><a href="/update">Firmware</a></nav></header>
+.wrap{max-width:800px;margin:0 auto;padding:0 16px 24px}
+header nav{display:flex;align-items:center}
+#themebtn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;margin-left:10px;border:1px solid #8884;border-radius:8px;background:transparent;color:inherit;cursor:pointer;padding:0;flex:none}
+#themebtn:hover{background:#8882}
+#themebtn svg{width:16px;height:16px}
+#themebtn .sun{display:none}
+html[data-theme="dark"] #themebtn .sun{display:block}
+html[data-theme="dark"] #themebtn .moon{display:none}
+html[data-theme="light"]{color-scheme:light}
+html[data-theme="dark"]{color-scheme:dark}
+html[data-theme="light"] body{background:#fff;color:#111}
+html[data-theme="dark"] body{background:#0f141b;color:#e6e8ee}
+html[data-theme="dark"] a{color:#8ab4ff}
+html[data-theme="dark"] .card{background:#161c26;border-color:#ffffff22}</style>
+<script>try{var t=localStorage.getItem('agent_theme');if(!t){t=matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'}document.documentElement.dataset.theme=t}catch(e){}</script></head><body>
+<header><h1><a href="/" style="color:inherit">Agent</a></h1><nav><a href="/">Chat</a><a href="/functions">Functions</a><a href="/docs">Docs</a><a href="/setup">Setup</a><a href="/update">Firmware</a><button id="themebtn" type="button" aria-label="Toggle dark mode" title="Toggle dark mode"><svg class="moon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg><svg class="sun" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></button></nav></header>
 <div class="wrap">
 <h2>Agent — Setup</h2>
 <p><a href="/wifi">WiFi</a> · <a href="/agent">Endpoint</a> · <a href="/api/status" target="_blank">Status</a></p>
 <div class="card"><h3>Step 1 — WiFi</h3><p>Pick hotspot / router + password.</p><a class="btn" href="/wifi">Open WiFi settings</a></div>
 <div class="card"><h3>Step 2 — Agent endpoint</h3><p>OpenAI-compatible base URL + API key + model. Saving here never touches WiFi.</p><a class="btn" href="/agent">Open Agent settings</a></div>
-</div></body></html>
+</div><script>(function(){var b=document.getElementById('themebtn');if(!b)return;b.addEventListener('click',function(){var h=document.documentElement;var n=h.dataset.theme==='dark'?'light':'dark';h.dataset.theme=n;try{localStorage.setItem('agent_theme',n)}catch(e){}});})();</script></body></html>
 )rawliteral";
 
 static const char WIFI_HTML[] PROGMEM = R"rawliteral(
@@ -326,8 +342,25 @@ button{margin-top:8px;padding:10px 14px;border-radius:8px;border:0;background:#0
 small{opacity:.7}#msg{margin-top:10px;font-size:13px}
 header{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #8884}
 header h1{font-size:16px;margin:0;line-height:1.2}nav{white-space:nowrap}nav a{margin-left:10px;font-size:13px;line-height:1.2}
-.wrap{max-width:800px;margin:0 auto;padding:0 16px 24px}</style></head><body>
-<header><h1><a href="/" style="color:inherit">Agent</a></h1><nav><a href="/">Chat</a><a href="/functions">Functions</a><a href="/docs">Docs</a><a href="/setup">Setup</a><a href="/update">Firmware</a></nav></header>
+.wrap{max-width:800px;margin:0 auto;padding:0 16px 24px}
+header nav{display:flex;align-items:center}
+#themebtn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;margin-left:10px;border:1px solid #8884;border-radius:8px;background:transparent;color:inherit;cursor:pointer;padding:0;flex:none;margin-top:0}
+#themebtn:hover{background:#8882}
+#themebtn svg{width:16px;height:16px}
+#themebtn .sun{display:none}
+html[data-theme="dark"] #themebtn .sun{display:block}
+html[data-theme="dark"] #themebtn .moon{display:none}
+html[data-theme="light"]{color-scheme:light}
+html[data-theme="dark"]{color-scheme:dark}
+html[data-theme="light"] body{background:#fff;color:#111}
+html[data-theme="dark"] body{background:#0f141b;color:#e6e8ee}
+html[data-theme="dark"] a{color:#8ab4ff}
+html[data-theme="dark"] .card{background:#161c26;border-color:#ffffff22}
+html[data-theme="dark"] input,html[data-theme="dark"] select{background:#1a2230;border-color:#ffffff2a;color:#e6e8ee}
+html[data-theme="dark"] code{background:#ffffff1a}
+html[data-theme="dark"] pre{background:#ffffff0d!important;border-color:#ffffff22}</style>
+<script>try{var t=localStorage.getItem('agent_theme');if(!t){t=matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'}document.documentElement.dataset.theme=t}catch(e){}</script></head><body>
+<header><h1><a href="/" style="color:inherit">Agent</a></h1><nav><a href="/">Chat</a><a href="/functions">Functions</a><a href="/docs">Docs</a><a href="/setup">Setup</a><a href="/update">Firmware</a><button id="themebtn" type="button" aria-label="Toggle dark mode" title="Toggle dark mode"><svg class="moon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg><svg class="sun" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></button></nav></header>
 <div class="wrap">
 <h2>WiFi setup</h2>
 <p><a href="/setup">Setup hub</a> · <a href="/agent">Endpoint →</a></p>
@@ -354,7 +387,7 @@ $('save').onclick=async()=>{msg.textContent='Saving…';
   const r=await fetch('/api/wifi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
   const j=await r.json();msg.textContent=j.ok?'Saved "'+j.ssid+'". Rebooting — rejoin your normal WiFi, then open http://esp32-agent.local or the new IP.':'Error: '+(j.error||r.status);};
 load();
-</script></div></body></html>
+</script><script>(function(){var b=document.getElementById('themebtn');if(!b)return;b.addEventListener('click',function(){var h=document.documentElement;var n=h.dataset.theme==='dark'?'light':'dark';h.dataset.theme=n;try{localStorage.setItem('agent_theme',n)}catch(e){}});})();</script></div></body></html>
 )rawliteral";
 
 static const char AGENT_HTML[] PROGMEM = R"rawliteral(
@@ -373,72 +406,51 @@ button{margin-top:12px;padding:10px 14px;border-radius:8px;border:0;background:#
 small{opacity:.7}#msg{margin-top:10px;font-size:13px}
 header{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #8884}
 header h1{font-size:16px;margin:0;line-height:1.2}nav{white-space:nowrap}nav a{margin-left:10px;font-size:13px;line-height:1.2}
-.wrap{max-width:800px;margin:0 auto;padding:0 16px 24px}</style></head><body>
-<header><h1><a href="/" style="color:inherit">Agent</a></h1><nav><a href="/">Chat</a><a href="/functions">Functions</a><a href="/docs">Docs</a><a href="/setup">Setup</a><a href="/update">Firmware</a></nav></header>
+.wrap{max-width:800px;margin:0 auto;padding:0 16px 24px}
+header nav{display:flex;align-items:center}
+#themebtn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;margin-left:10px;border:1px solid #8884;border-radius:8px;background:transparent;color:inherit;cursor:pointer;padding:0;flex:none;margin-top:0}
+#themebtn:hover{background:#8882}
+#themebtn svg{width:16px;height:16px}
+#themebtn .sun{display:none}
+html[data-theme="dark"] #themebtn .sun{display:block}
+html[data-theme="dark"] #themebtn .moon{display:none}
+html[data-theme="light"]{color-scheme:light}
+html[data-theme="dark"]{color-scheme:dark}
+html[data-theme="light"] body{background:#fff;color:#111}
+html[data-theme="dark"] body{background:#0f141b;color:#e6e8ee}
+html[data-theme="dark"] a{color:#8ab4ff}
+html[data-theme="dark"] .card{background:#161c26;border-color:#ffffff22}
+html[data-theme="dark"] input,html[data-theme="dark"] select{background:#1a2230;border-color:#ffffff2a;color:#e6e8ee}
+html[data-theme="dark"] code{background:#ffffff1a}
+html[data-theme="dark"] pre{background:#ffffff0d!important;border-color:#ffffff22}</style>
+<script>try{var t=localStorage.getItem('agent_theme');if(!t){t=matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'}document.documentElement.dataset.theme=t}catch(e){}</script></head><body>
+<header><h1><a href="/" style="color:inherit">Agent</a></h1><nav><a href="/">Chat</a><a href="/functions">Functions</a><a href="/docs">Docs</a><a href="/setup">Setup</a><a href="/update">Firmware</a><button id="themebtn" type="button" aria-label="Toggle dark mode" title="Toggle dark mode"><svg class="moon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg><svg class="sun" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></button></nav></header>
 <div class="wrap">
 <h2>Agent endpoint</h2>
 <p><a href="/setup">Setup hub</a> · <a href="/wifi">WiFi</a></p>
 <div class="card">
-<label>Base URL (OpenAI-compatible)</label><input id="endpoint" placeholder="https://api.openai.com/v1" autocomplete="url"/>
-<small>Base URL only — <code>/chat/completions</code> is appended automatically. Works with OpenAI, Ollama, LM Studio, vLLM, OpenRouter, etc. Saving here never touches WiFi, no reboot.</small>
-<label>API key</label><input id="key" type="password" placeholder="sk-… (blank = keep saved)" autocomplete="current-password"/>
-<label>Model — type a few characters to filter 400+ OpenRouter models</label>
-<div id="mwrap" style="position:relative"><input id="model" placeholder="e.g. deepseek…" autocomplete="off" spellcheck="false"/><div id="mlist" style="position:absolute;top:calc(100% + 4px);left:0;right:0;max-height:260px;overflow-y:auto;border:1px solid #8886;border-radius:10px;background:Canvas;display:none;z-index:10"></div></div>
-<style>.mopt{padding:7px 10px;cursor:pointer;font-size:12px}.mopt:hover{background:#0b6cff33}.mopt .mid{font-weight:600;word-break:break-all}.mopt .mmeta{opacity:.6;font-size:11px}</style>
+<label>Base URL (OpenAI-compatible) <span style="color:#c00">*</span></label><input id="endpoint" placeholder="https://api.openai.com/v1" autocomplete="url"/>
+<small>Base URL only — <code>/chat/completions</code> is appended automatically. Works with OpenAI, Ollama, LM Studio, vLLM, etc. Saving here never touches WiFi, no reboot. <b>Required on first setup.</b></small>
+<label>API key (optional)</label><input id="key" type="password" placeholder="sk-… (blank = keep saved)" autocomplete="current-password"/>
+<small>Not needed for keyless local endpoints. Blank keeps the saved key.</small>
+<label>Model (exact model ID, optional)</label><input id="model" placeholder="e.g. llama3.1, gpt-4o-mini" autocomplete="off" spellcheck="false"/>
+<small>Exact ID your endpoint serves. You can also switch models from the list in the chat composer.</small>
 </div>
 <button id="save">Save agent settings (no reboot)</button>
 <div id="msg"></div>
 <script>
 const $=id=>document.getElementById(id),msg=$('msg');
-let MODELS=[];
-function money(p){const v=parseFloat(p);if(isNaN(v))return '';return '$'+(v*1e6).toFixed(2)+'/M';}
-function ctx(c){c=+c||0;if(c>=1e6)return (c/1e6).toFixed(1)+'M ctx';if(c>=1e3)return Math.round(c/1e3)+'k ctx';return '';}
-async function loadModels(){
-  try{const c=JSON.parse(localStorage.getItem('or_models')||'null');
-    if(c&&c.t&&Date.now()-c.t<864e5&&c.m&&c.m.length){MODELS=c.m;return;}}catch(e){}
-  try{const r=await fetch('https://openrouter.ai/api/v1/models');const j=await r.json();
-    MODELS=(j.data||[]).map(m=>[m.id,m.name||'',(m.pricing&&m.pricing.prompt)||'',(m.pricing&&m.pricing.completion)||'',(m.pricing&&m.pricing.input_cache_read)||'',m.context_length||0]);
-    try{localStorage.setItem('or_models',JSON.stringify({t:Date.now(),m:MODELS}));}catch(e){}
-  }catch(e){}
-}
-function renderModels(q){
-  const box=$('mlist');q=(q||'').toLowerCase().trim();
-  const toks=q.split(/\s+/).filter(Boolean);
-  let list=MODELS.filter(m=>{const h=(m[0]+' '+m[1]).toLowerCase();return toks.every(t=>h.includes(t));});
-  list.sort((a,b)=>{const ai=a[0].toLowerCase().indexOf(toks[0]||''),bi=b[0].toLowerCase().indexOf(toks[0]||'');return ai-bi;});
-  list=list.slice(0,30);
-  box.innerHTML='';
-  if(!list.length){box.style.display='none';return;}
-  for(const m of list){
-    const d=document.createElement('div');d.className='mopt';
-    const pp=[];
-    if(m[2]!=='')pp.push((()=>{const v=parseFloat(m[2]);return isNaN(v)?'':'$'+(v*1e6).toFixed(2)+' in';})());
-    if(m[3]!=='')pp.push((()=>{const v=parseFloat(m[3]);return isNaN(v)?'':'$'+(v*1e6).toFixed(2)+' out';})());
-    if(m[4]!=='')pp.push((()=>{const v=parseFloat(m[4]);return isNaN(v)?'':'$'+(v*1e6).toFixed(2)+' cache';})());
-    let meta=pp.filter(Boolean).join(' · ');if(meta)meta+=' /Mtok';
-    const c=+m[5]||0;if(c>=1e6)meta+=(meta?' • ':'')+(c/1e6).toFixed(1)+'M ctx';else if(c>=1e3)meta+=(meta?' • ':'')+Math.round(c/1e3)+'k ctx';
-    if(m[1]&&m[1]!==m[0])meta=(meta?m[1]+' • '+meta:m[1]);
-    d.innerHTML='<div class="mid"></div>'+(meta?'<div class="mmeta"></div>':'');
-    d.firstChild.textContent=m[0];if(meta)d.lastChild.textContent=meta;
-    d.onmousedown=e=>{e.preventDefault();$('model').value=m[0];box.style.display='none';};
-    box.appendChild(d);
-  }
-  box.style.display='block';
-}
-$('model').addEventListener('input',e=>renderModels(e.target.value));
-$('model').addEventListener('focus',e=>renderModels(e.target.value));
-$('model').addEventListener('blur',()=>setTimeout(()=>$('mlist').style.display='none',150));
 async function load(){try{const s=await(await fetch('/api/agent')).json();
   $('endpoint').value=s.endpoint||'';$('model').value=s.model||'deepseek/deepseek-v4.1-flash';
   if(s.api_key_masked)msg.textContent='Saved key: '+s.api_key_masked+' (leave blank to keep)';
 }catch(e){}
-loadModels();}
+load();}
 $('save').onclick=async()=>{msg.textContent='Saving…';
   const b={endpoint:$('endpoint').value,apiKey:$('key').value,model:$('model').value};
   const r=await fetch('/api/agent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
   const j=await r.json();msg.textContent=j.ok?'Saved. No reboot — go to <a href="/">Chat</a>.':'Error: '+(j.error||r.status);};
 load();
-</script></div></body></html>
+</script><script>(function(){var b=document.getElementById('themebtn');if(!b)return;b.addEventListener('click',function(){var h=document.documentElement;var n=h.dataset.theme==='dark'?'light':'dark';h.dataset.theme=n;try{localStorage.setItem('agent_theme',n)}catch(e){}});})();</script></div></body></html>
 )rawliteral";
 
 static const char UPDATE_HTML[] PROGMEM = R"rawliteral(
@@ -451,9 +463,26 @@ static const char UPDATE_HTML[] PROGMEM = R"rawliteral(
 a{text-decoration:none}
 header{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #8884}
 header h1{font-size:16px;margin:0;line-height:1.2}nav{white-space:nowrap}nav a{margin-left:10px;font-size:13px;line-height:1.2}
-.wrap{max-width:800px;margin:0 auto;padding:0 16px 24px}</style>
+.wrap{max-width:800px;margin:0 auto;padding:0 16px 24px}
+header nav{display:flex;align-items:center}
+#themebtn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;margin-left:10px;border:1px solid #8884;border-radius:8px;background:transparent;color:inherit;cursor:pointer;padding:0;flex:none;margin-top:0}
+#themebtn:hover{background:#8882}
+#themebtn svg{width:16px;height:16px}
+#themebtn .sun{display:none}
+html[data-theme="dark"] #themebtn .sun{display:block}
+html[data-theme="dark"] #themebtn .moon{display:none}
+html[data-theme="light"]{color-scheme:light}
+html[data-theme="dark"]{color-scheme:dark}
+html[data-theme="light"] body{background:#fff;color:#111}
+html[data-theme="dark"] body{background:#0f141b;color:#e6e8ee}
+html[data-theme="dark"] a{color:#8ab4ff}
+html[data-theme="dark"] .card{background:#161c26;border-color:#ffffff22}
+html[data-theme="dark"] input,html[data-theme="dark"] select{background:#1a2230;border-color:#ffffff2a;color:#e6e8ee}
+html[data-theme="dark"] code{background:#ffffff1a}
+html[data-theme="dark"] pre{background:#ffffff0d!important;border-color:#ffffff22}</style>
+<script>try{var t=localStorage.getItem('agent_theme');if(!t){t=matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'}document.documentElement.dataset.theme=t}catch(e){}</script>
 </head><body>
-<header><h1><a href="/" style="color:inherit">Agent</a></h1><nav><a href="/">Chat</a><a href="/functions">Functions</a><a href="/docs">Docs</a><a href="/setup">Setup</a><a href="/update">Firmware</a></nav></header>
+<header><h1><a href="/" style="color:inherit">Agent</a></h1><nav><a href="/">Chat</a><a href="/functions">Functions</a><a href="/docs">Docs</a><a href="/setup">Setup</a><a href="/update">Firmware</a><button id="themebtn" type="button" aria-label="Toggle dark mode" title="Toggle dark mode"><svg class="moon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg><svg class="sun" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></button></nav></header>
 <div class="wrap">
 <h2>Firmware update (OTA, no cable)</h2>
 <form method="POST" action="/update" enctype="multipart/form-data">
@@ -461,7 +490,7 @@ header h1{font-size:16px;margin:0;line-height:1.2}nav{white-space:nowrap}nav a{m
 <button type="submit">Upload .bin</button></form>
 <p><small>Build with <code>pio run</code> then upload <code>.pio/build/esp32dev/firmware.bin</code> here.
 Or use ArduinoOTA: <code>pio run --target upload --upload-port &lt;ESP_IP&gt;</code></small></p>
-</div></body></html>
+</div><script>(function(){var b=document.getElementById('themebtn');if(!b)return;b.addEventListener('click',function(){var h=document.documentElement;var n=h.dataset.theme==='dark'?'light':'dark';h.dataset.theme=n;try{localStorage.setItem('agent_theme',n)}catch(e){}});})();</script></body></html>
 )rawliteral";
 
 static const char FUNCS_HTML[] PROGMEM = R"rawliteral(
@@ -477,8 +506,25 @@ small{opacity:.7}button{margin-top:12px;padding:10px 14px;border-radius:8px;bord
 #msg{margin-top:10px;font-size:13px}
 header{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #8884}
 header h1{font-size:16px;margin:0;line-height:1.2}nav{white-space:nowrap}nav a{margin-left:10px;font-size:13px;line-height:1.2}
-.wrap{max-width:800px;margin:0 auto;padding:0 16px 24px}</style></head><body>
-<header><h1><a href="/" style="color:inherit">Agent</a></h1><nav><a href="/">Chat</a><a href="/functions">Functions</a><a href="/docs">Docs</a><a href="/setup">Setup</a><a href="/update">Firmware</a></nav></header>
+.wrap{max-width:800px;margin:0 auto;padding:0 16px 24px}
+header nav{display:flex;align-items:center}
+#themebtn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;margin-left:10px;border:1px solid #8884;border-radius:8px;background:transparent;color:inherit;cursor:pointer;padding:0;flex:none;margin-top:0}
+#themebtn:hover{background:#8882}
+#themebtn svg{width:16px;height:16px}
+#themebtn .sun{display:none}
+html[data-theme="dark"] #themebtn .sun{display:block}
+html[data-theme="dark"] #themebtn .moon{display:none}
+html[data-theme="light"]{color-scheme:light}
+html[data-theme="dark"]{color-scheme:dark}
+html[data-theme="light"] body{background:#fff;color:#111}
+html[data-theme="dark"] body{background:#0f141b;color:#e6e8ee}
+html[data-theme="dark"] a{color:#8ab4ff}
+html[data-theme="dark"] .card{background:#161c26;border-color:#ffffff22}
+html[data-theme="dark"] input,html[data-theme="dark"] select{background:#1a2230;border-color:#ffffff2a;color:#e6e8ee}
+html[data-theme="dark"] code{background:#ffffff1a}
+html[data-theme="dark"] pre{background:#ffffff0d!important;border-color:#ffffff22}</style>
+<script>try{var t=localStorage.getItem('agent_theme');if(!t){t=matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'}document.documentElement.dataset.theme=t}catch(e){}</script></head><body>
+<header><h1><a href="/" style="color:inherit">Agent</a></h1><nav><a href="/">Chat</a><a href="/functions">Functions</a><a href="/docs">Docs</a><a href="/setup">Setup</a><a href="/update">Firmware</a><button id="themebtn" type="button" aria-label="Toggle dark mode" title="Toggle dark mode"><svg class="moon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg><svg class="sun" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></button></nav></header>
 <div class="wrap">
 <h2>Device functions</h2>
 <p><a href="/docs">How to use →</a> · <a href="/api/tools" target="_blank">JSON</a> · <a href="/api/memory" target="_blank">Memory</a></p>
@@ -516,7 +562,7 @@ document.getElementById('clrMem').onclick=()=>clearMem('clear_memory');
 document.getElementById('clrLog').onclick=()=>clearMem('clear_log');
 load();
 loadMem();
-</script></div></body></html>
+</script><script>(function(){var b=document.getElementById('themebtn');if(!b)return;b.addEventListener('click',function(){var h=document.documentElement;var n=h.dataset.theme==='dark'?'light':'dark';h.dataset.theme=n;try{localStorage.setItem('agent_theme',n)}catch(e){}});})();</script></div></body></html>
 )rawliteral";
 
 static const char DOCS_HTML[] PROGMEM = R"rawliteral(
@@ -531,11 +577,29 @@ small{opacity:.7}code{background:#8882;padding:1px 6px;border-radius:6px;font-si
 pre{background:#8881;border:1px solid #8883;border-radius:10px;padding:10px;overflow-x:auto;font-size:12px;white-space:pre-wrap;word-break:break-word}
 header{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #8884}
 header h1{font-size:16px;margin:0;line-height:1.2}nav{white-space:nowrap}nav a{margin-left:10px;font-size:13px;line-height:1.2}
-.wrap{max-width:800px;margin:0 auto;padding:0 16px 24px}ul,ol{line-height:1.7;font-size:14px}h3{margin:22px 0 6px}p{font-size:14px;line-height:1.6}table{border-collapse:collapse;width:100%;font-size:13px}td,th{border:1px solid #8884;padding:6px 8px;text-align:left;vertical-align:top}</style></head><body>
-<header><h1><a href="/" style="color:inherit">Agent</a></h1><nav><a href="/">Chat</a><a href="/functions">Functions</a><a href="/docs">Docs</a><a href="/setup">Setup</a><a href="/update">Firmware</a></nav></header>
+.wrap{max-width:800px;margin:0 auto;padding:0 16px 24px}ul,ol{line-height:1.7;font-size:14px}h3{margin:22px 0 6px}p{font-size:14px;line-height:1.6}table{border-collapse:collapse;width:100%;font-size:13px}td,th{border:1px solid #8884;padding:6px 8px;text-align:left;vertical-align:top}
+header nav{display:flex;align-items:center}
+#themebtn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;margin-left:10px;border:1px solid #8884;border-radius:8px;background:transparent;color:inherit;cursor:pointer;padding:0;flex:none;margin-top:0}
+#themebtn:hover{background:#8882}
+#themebtn svg{width:16px;height:16px}
+#themebtn .sun{display:none}
+html[data-theme="dark"] #themebtn .sun{display:block}
+html[data-theme="dark"] #themebtn .moon{display:none}
+html[data-theme="light"]{color-scheme:light}
+html[data-theme="dark"]{color-scheme:dark}
+html[data-theme="light"] body{background:#fff;color:#111}
+html[data-theme="dark"] body{background:#0f141b;color:#e6e8ee}
+html[data-theme="dark"] a{color:#8ab4ff}
+html[data-theme="dark"] .card{background:#161c26;border-color:#ffffff22}
+html[data-theme="dark"] input,html[data-theme="dark"] select{background:#1a2230;border-color:#ffffff2a;color:#e6e8ee}
+html[data-theme="dark"] code{background:#ffffff1a}
+html[data-theme="dark"] pre{background:#ffffff0d!important;border-color:#ffffff22}
+html[data-theme="dark"] td,html[data-theme="dark"] th{border-color:#ffffff22}</style>
+<script>try{var t=localStorage.getItem('agent_theme');if(!t){t=matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'}document.documentElement.dataset.theme=t}catch(e){}</script></head><body>
+<header><h1><a href="/" style="color:inherit">Agent</a></h1><nav><a href="/">Chat</a><a href="/functions">Functions</a><a href="/docs">Docs</a><a href="/setup">Setup</a><a href="/update">Firmware</a><button id="themebtn" type="button" aria-label="Toggle dark mode" title="Toggle dark mode"><svg class="moon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg><svg class="sun" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></button></nav></header>
 <div class="wrap">
 <h2>ESP32 Agent — what it is</h2>
-<p>A tiny on-device assistant. The chat page at <a href="/">/</a> forwards your message to any OpenAI-compatible <code>/chat/completions</code> endpoint (OpenAI, OpenRouter, Ollama, LM Studio, vLLM…), and the model can call back into this ESP32 to <b>read pins, blink LEDs, scan WiFi, remember facts, fetch web pages, or restart</b>. Replies stream live; anything starting with <code>⚙️</code> means tools ran first.</p>
+<p>A tiny on-device assistant. The chat page at <a href="/">/</a> forwards your message to any OpenAI-compatible <code>/chat/completions</code> endpoint (OpenAI, Ollama, LM Studio, vLLM…), and the model can call back into this ESP32 to <b>read pins, blink LEDs, scan WiFi, remember facts, fetch web pages, or restart</b>. Replies stream live; anything starting with <code>⚙️</code> means tools ran first.</p>
 <div class="card"><h3>Start in 30 seconds</h3>
 <ol><li>Open <a href="/">Chat</a> and ask <code>are you online? what is your heap and wifi?</code></li>
 <li>Open <a href="/functions">Functions</a> — tick only what you need (fewer tools = cheaper + faster).</li>
@@ -627,5 +691,5 @@ A34=1842, D13=LOW.</pre>
 <li>Upstream errors (bad key/model, HTTP 4xx/5xx) come back as <code>ERROR: …</code> — check <a href="/agent">Endpoint</a> first.</li>
 </ul>
 <p><small><a href="/">Chat</a> · <a href="/functions">Functions</a> · <a href="/api/tools" target="_blank">tools JSON</a> · <a href="/api/memory" target="_blank">memory JSON</a></small></p>
-</div></body></html>
+</div><script>(function(){var b=document.getElementById('themebtn');if(!b)return;b.addEventListener('click',function(){var h=document.documentElement;var n=h.dataset.theme==='dark'?'light':'dark';h.dataset.theme=n;try{localStorage.setItem('agent_theme',n)}catch(e){}});})();</script></body></html>
 )rawliteral";

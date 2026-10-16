@@ -1,66 +1,145 @@
-# ESP32 Agent — WiFi portal + OpenAI-compatible chat + OTA
+# ESP32 Agent
 
-ESP32 firmware: captive WiFi setup via browser, agent endpoint/API-key setup,
-LAN web server with chat UI that forwards to any OpenAI-compatible
-`/chat/completions` endpoint, plus cable-free updates.
+> Give any ESP32 a chat brain: talk to it from your browser, let it flip pins, read sensors, remember facts, and update itself over WiFi.
 
-## What you get
+ESP32 Agent turns a $5 ESP32 into a tiny AI assistant you open like a website — no app to install, no cloud account on the device. Connect it to your WiFi once from your phone, point it at any OpenAI-compatible chat endpoint, and ask it to check its health, blink an LED, scan networks, remember your preferences, or look something up on the web.
 
-- Boot with no WiFi → AP **`ESP32-Agent-Setup`** (open) at `http://192.168.4.1/wifi`.
-  WiFi on `/wifi` (reboots), agent endpoint on `/agent` (no reboot, never touches WiFi).
-  Hub at `/setup`.
-- Boot with WiFi → chat at `http://<ESP_IP>/` and `http://esp32-agent.local/`.
-- `POST /api/chat {"message":"hi","history":[...]}` → ESP32 calls
-  `<endpoint>/chat/completions` with `Authorization: Bearer <key>` and returns `reply`.
-- `GET /api/status`, `GET /api/scan`, `GET/POST /api/wifi`, `GET/POST /api/agent`,
-  `GET/POST /api/config` (legacy), `POST /api/reset`.
-- OTA: ArduinoOTA + browser `GET/POST /update` (upload `firmware.bin`).
+It is also a starting point. If you want to build your own ESP32 application with an LLM inside — a greenhouse monitor, a garage helper, a classroom demo — flash this first, play with it for ten minutes, then fork the code and make it yours. The heavy lifting (WiFi portal, chat UI, tool loop, memory, over-the-air updates) is already done.
 
-## No boot button after the first flash
+## Features
 
-- First flash uses USB + auto-reset (DTR/RTS via CP210x). Boards **with** the
-  auto-reset circuit flash with no button. Boards **without** it (or flaky
-  ones — like the one on COM8 right now, which answers `Wrong boot mode 0x13`)
-  need **one** manual step: hold `BOOT`, tap `EN`, release `BOOT`, then upload.
-- Every flash after that is over WiFi:
-  - `pio run --target upload --upload-port <ESP_IP>` (ArduinoOTA), or
-  - browser → `http://<ESP_IP>/update` → upload `.pio/build/esp32dev/firmware.bin`.
-- So the agent (me) can keep iterating without you touching the board.
+- **Phone-friendly setup:** first boot creates an open `ESP32-Agent-Setup` network with a captive portal. Pick your home WiFi and paste your AI endpoint without touching code.
+- **Chat in your browser:** fast streaming replies with a "Thinking" view, chat history, and a model picker at `http://esp32-agent.local/`.
+- **It can touch hardware:** ask it to report heap/uptime/WiFi, read or write GPIO, read analog sensors, scan nearby networks, or blink a pin.
+- **It remembers:** tell it "my plant is a basil" and it saves the fact to onboard flash, recalls it next week, and shows it on the memory page.
+- **It can look things up:** ask for fresh info and it fetches web pages as plain text (no JavaScript, no logins).
+- **Works with your provider:** any endpoint that speaks `POST {base}/chat/completions` — OpenAI, Together, or a local gateway. The model picker lists whatever `GET {base}/models` on your endpoint returns.
+- **No cable after day one:** update firmware from your browser or with one PlatformIO command. Toggle capabilities on the Functions page without reflashing.
+- **Honest status:** `/api/status` and the on-device Docs page always tell you IP, model, heap, and what is configured.
 
-## Build / flash
+## Prerequisites
+
+- **ESP32 dev board** (ESP32-WROOM / `esp32dev` style with USB serial) + USB cable. The onboard LED (usually GPIO 2) is enough to try blinking.
+- **A computer** with [PlatformIO](https://platformio.org/) installed (CLI or VS Code extension) for the first flash, plus the USB driver for your board (CP210x or CH340).
+- **2.4 GHz WiFi** credentials the ESP32 can join.
+- **A phone or laptop** with a browser for setup and chat.
+- **An AI endpoint + key + model name** — for example `https://api.openai.com/v1` with `gpt-4o-mini`, or any OpenAI-compatible provider. You paste these into a web form; they are stored only on the ESP32.
+
+## Installation
+
+One USB flash, then everything is wireless.
 
 ```powershell
-pio run                                  # compile check
-pio run --target upload                  # USB flash (uses COM8 per platformio.ini)
-pio run --target upload --upload-port 192.168.1.50   # OTA flash, no cable/button
-pio device monitor --baud 115200         # logs; shows IP + mDNS
+# From the project folder:
+
+pio run                                  # compile check — no hardware needed
+
+pio run --target upload                  # first flash over USB
+# If your board is not on COM8, override it:
+# pio run --target upload --upload-port COM5
+
+pio device monitor --baud 115200         # watch boot logs, note the IP address
 ```
 
-## Setup (phone or laptop)
+What to expect:
 
-1. Power ESP32 → join WiFi `ESP32-Agent-Setup` → open `http://192.168.4.1/wifi`
-   (if not, open it manually).
-2. `/wifi`: Scan → pick hotspot → password → Save & Reboot. Blank password keeps saved one.
-3. `/agent`: endpoint e.g. `https://api.openai.com/v1`, key `sk-…`, model → Save (no reboot, WiFi untouched).
-4. Rejoin your normal WiFi → open `http://esp32-agent.local/` or the IP from serial logs.
+1. The log prints `=== Agent boot ===`, then either `WiFi OK: 192.168.x.x` or `AP started: ESP32-Agent-Setup -> http://192.168.4.1/setup`.
+2. Note the IP address, or open `http://esp32-agent.local/` if your network resolves mDNS.
+3. Leave the monitor running while you configure — it confirms every save.
 
-## "From anywhere" — honest note
+Only the very first flash needs USB and possibly the BOOT button (see Troubleshooting). After that, flash with either of these — no cable, no button:
 
-The ESP32 serves on your LAN. It is **not** reachable from the internet by default
-(CGNAT/firewall). Options:
+```powershell
+pio run --target upload --upload-port 192.168.1.50   # your ESP's IP from the logs
+```
 
-- Same network: `http://esp32-agent.local/` (mDNS) — works now.
-- Outside: port-forward `:80` on your router (risky, add auth first), or run
-  Tailscale on a PC/phone + reverse-proxy to the ESP IP, or `cloudflared`/ngrok
-  TCP tunnel on a PC pointing at the ESP IP. Ask and I'll walk you through one.
+Or in a browser: open `http://<ESP_IP>/update`, choose `.pio/build/esp32dev/firmware.bin`, Upload. The device reboots itself.
 
-## Files
+## Configuration
 
-- `platformio.ini` — esp32dev, Arduino, ArduinoJson, COM8 + OTA notes.
-- `src/main.cpp` — slim entry: `setup()`/`loop()` only (~50 lines).
-- `src/config.h/.cpp` — prefs, `cfg*`, tools mask, URL/key helpers.
-- `src/agent_tools.h/.cpp` — GPIO/ADC/wifi-scan/memory/log + `blink` + `web_fetch` (10 tools).
-- `src/web_ui.h` — PROGMEM HTML only (Chat/Setup/WiFi/Agent/Update/Functions/Docs). Agents: skip unless editing UI.
-- `src/llm.h/.cpp` — OpenAI-compatible bridge + agentic tool loop.
-- `src/net.h/.cpp` — `server`/`dnsServer`, `connectWiFi()`, `startAP()`.
-- `src/routes.h/.cpp` — all `handle*` + `setupRoutes()` (`/`, `/docs`, `/functions`, `/api/*`, `/update`).
+All settings are entered in the browser and stored on the device. Blank fields keep whatever was already saved.
+
+1. **Join WiFi:** power the ESP32. On your phone/laptop join the open network **`ESP32-Agent-Setup`**, then open **`http://192.168.4.1/wifi`** (most devices redirect there automatically).
+2. **Save WiFi:** press Scan, pick your network, enter the password, Save & Reboot. Blank password keeps the saved one when the network name is unchanged.
+3. **Rejoin your normal WiFi** on your phone/laptop — the setup network disappears after the reboot.
+4. **Point at your AI:** open `http://esp32-agent.local/` (or the IP from the serial log), go to **Setup → Agent** (`/agent`), and enter:
+   - Endpoint base, e.g. `https://api.openai.com/v1` (`/chat/completions` is added automatically)
+   - API key (`sk-…`) — shown masked after saving
+   - Model, e.g. `gpt-4o-mini`
+   
+   Save applies instantly — no reboot, WiFi stays connected.
+5. **Verify:** the chat header warning disappears. If it still shows a warning, click through to `/wifi` or `/agent`.
+
+Handy pages (also linked from `/setup`):
+
+| Page | Address | Use |
+|------|---------|-----|
+| Chat | `http://esp32-agent.local/` | Talk to the device |
+| Setup hub | `/setup` | Links to everything below |
+| WiFi | `/wifi` | Change networks (reboots) |
+| Agent | `/agent` | Change endpoint / key / model (no reboot) |
+| Functions | `/functions` | Turn capabilities on/off |
+| Docs | `/docs` | On-device quick reference |
+| Firmware | `/update` | Upload `firmware.bin` from a browser |
+
+## Quick Start / Usage
+
+Open the chat page and just type. History is kept on the device, so follow-ups work ("and blink it twice").
+
+Try these in order:
+
+```text
+what is your heap, uptime and IP?
+scan for nearby wifi networks
+blink GPIO 2 five times
+read GPIO 34 as analog
+remember that my plant is a basil
+what did I tell you about my plant?
+fetch https://example.com and summarize it in one line
+```
+
+A few things worth knowing:
+
+- **Streaming + fallback:** most answers stream word-by-word. When the model wants to use a tool (pins, WiFi, web), the page automatically runs the full agent pass and shows what ran.
+- **Thinking:** open the *Thinking* block under a reply to see the model's reasoning when the provider shares it.
+- **Functions page:** untick anything you don't want the model to touch (e.g. `restart_device`, `gpio_write`). Changes apply immediately.
+- **Memory:** view or clear saved facts and recent chat on the memory panel. One fact per line, kept in onboard flash across reboots and firmware updates.
+- **Stop / start:** there is no power button in software — unplug to stop, plug in to start. To start over completely (wipe WiFi, keys, memory), send `POST /api/reset` or reflash and reset from the UI. The device comes back as a fresh `ESP32-Agent-Setup` unit.
+
+When you are ready to make it yours — new tools, new prompt, new pages — the developer guides below walk through exactly where each piece lives.
+
+## Troubleshooting / FAQ
+
+**Upload fails with `Wrong boot mode 0x13`?**
+Your board's auto-reset circuit is missing or flaky. Hold `BOOT`, tap `EN`, release `BOOT`, then retry `pio run --target upload`. One manual step — OTA takes over after that.
+
+**I joined `ESP32-Agent-Setup` but nothing loads?**
+Open `http://192.168.4.1/wifi` manually. Some phones need mobile data turned off to stay on a network without internet.
+
+**`http://esp32-agent.local/` doesn't resolve?**
+Use the IP from `pio device monitor` (the `WiFi OK:` line) instead, e.g. `http://192.168.1.50/`. mDNS works on most home networks but not all Windows/VPN setups.
+
+**Chat says "no WiFi" or "endpoint not configured"?**
+Follow the banner links to `/wifi` and `/agent`. Remember: saving WiFi reboots the device (rejoin your home network afterwards); saving the agent endpoint does not.
+
+**Upstream HTTP 401 / 404 / "empty reply"?**
+Recheck endpoint, key, and exact model name on `/agent`. The on-device probe `GET /api/debug-raw?message=Reply%20with%20just%20OK` shows the raw provider response without leaking your key.
+
+**Can I reach it from outside my home?**
+Not by default — it serves on your LAN only (port 80), which is the safe choice behind home routers and CGNAT. On the same network, just use the `.local` name or IP. For remote access, either port-forward `:80` on your router (add a password first — there is none today), or run Tailscale / `cloudflared` on a PC that can see the ESP's IP and proxy to it.
+
+**How do I wipe everything?**
+`POST /api/reset` clears WiFi, endpoint, key, model, memory, and chat log, then reboots into setup mode.
+
+## License
+
+MIT — Copyright (c) 2026 Miguel Perez. See [LICENSE](./LICENSE).
+
+## Developer Documentation
+
+- [Architecture](./docs/architecture.md) — Tech stack, runtime modes, and request/data flow
+- [Project Structure](./docs/project-structure.md) — Folder layout and where to change things
+- [Development Guide](./docs/development.md) — Local setup, flashing, OTA, and debugging
+- [API Reference](./docs/api.md) — Pages and JSON endpoints with request/response shapes
+- [Agent Tools and LLM Bridge](./docs/agent-tools.md) — The 10 tools, memory, and how to add a tool
+- [Build and Deployment](./docs/build-and-deployment.md) — Environments, USB/OTA flashing, flash layout
