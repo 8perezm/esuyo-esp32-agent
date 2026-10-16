@@ -78,6 +78,7 @@ html[data-theme="dark"] #msearch{background:#1a2230;border-color:#ffffff2a;color
 <script>try{var t=localStorage.getItem('agent_theme');if(!t){t=matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'}document.documentElement.dataset.theme=t}catch(e){}</script></head><body>
 <header><h1><a href="/" style="color:inherit">Agent</a></h1><nav><a href="/">Chat</a><a href="/functions">Functions</a><a href="/docs">Docs</a><a href="/setup">Setup</a><a href="/update">Firmware</a><button id="themebtn" type="button" aria-label="Toggle dark mode" title="Toggle dark mode"><svg class="moon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg><svg class="sun" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></button></nav></header>
 <div id="warn"></div>
+<div id="authov" style="display:none;position:fixed;inset:0;background:#0008;z-index:99;align-items:center;justify-content:center"><div style="background:Canvas;padding:18px;border-radius:12px;min-width:280px;max-width:90vw;border:1px solid #8885"><h3 style="margin:0 0 8px">Device password</h3><p style="font-size:13px;opacity:.8;margin:0 0 8px">This device is locked. Enter password once — remembered in this browser.</p><input id="authtok" type="password" placeholder="Device password" autocomplete="current-password" style="width:100%;padding:10px;border-radius:8px;border:1px solid #8888;box-sizing:border-box;font:inherit"/><div style="display:flex;gap:8px;margin-top:10px"><button id="authok" style="flex:1;margin:0;padding:10px 14px;border-radius:8px;border:0;background:#0b6cff;color:#fff;font-weight:700;cursor:pointer">Unlock</button><button id="authcancel" type="button" style="margin:0;padding:10px 14px;border-radius:8px;border:0;background:#444;color:#fff;font-weight:700;cursor:pointer">Cancel</button></div><div id="authmsg" style="font-size:12px;margin-top:6px"></div></div></div>
 <div id="log"><div class="sys">Connected. Ask anything.</div></div>
 <div id="status"></div>
 <div id="composer">
@@ -94,18 +95,24 @@ html[data-theme="dark"] #msearch{background:#1a2230;border-color:#ffffff2a;color
   </div>
 </div>
 <script>
+function tok(){try{return localStorage.getItem('esp32_token')||''}catch(e){return ''}}
+function setTok(t){try{if(t)localStorage.setItem('esp32_token',t);else localStorage.removeItem('esp32_token')}catch(e){}}
+function ah(h){h=h||{};var t=tok();if(t)h['Authorization']='Bearer '+t;return h}
+async function af(u,o){o=o||{};o.headers=ah(Object.assign({},o.headers||{}));var r=await fetch(u,o);if(r.status===401){var ov=document.getElementById('authov');if(ov)ov.style.display='flex';var e=new Error('auth required');e.status=401;throw e;}return r}
+(function(){var ok=document.getElementById('authok'),c=document.getElementById('authcancel');if(ok)ok.onclick=function(){var v=document.getElementById('authtok').value||'';setTok(v);document.getElementById('authov').style.display='none';location.reload();};if(c)c.onclick=function(){document.getElementById('authov').style.display='none';};})();
 const log=document.getElementById('log'),inp=document.getElementById('in'),
 send=document.getElementById('send'),warn=document.getElementById('warn'),st=document.getElementById('status');
 let history=[];
-fetch('/api/status').then(r=>r.json()).then(s=>{
+af('/api/status').then(r=>r.json()).then(s=>{
   let m=[];
   if(!s.wifi_connected)m.push('WiFi not connected — <a href="/wifi">open WiFi setup</a>.');
   if(!s.endpoint_configured)m.push('Agent endpoint/API key missing — <a href="/agent">open Setup</a>.');
+  if(!s.auth_required)m.push('Open device — anyone on WiFi can use the API. <a href="/setup">Set a password</a>.');
   if(m.length){warn.style.display='block';warn.innerHTML=m.join('<br/>');}
   if(s.model)setPill(s.model,true);
   window._model=s.model||'';
   st.textContent=(s.ip||'')+' • '+(s.model||'')+' • '+(s.free_heap?Math.round(s.free_heap/1024)+'KB heap':'');
-}).catch(()=>{});
+}).catch(e=>{if(e&&e.status===401){/* overlay already shown */}});
 function add(text,cls){const d=document.createElement('div');d.className='msg '+cls;d.textContent=text;log.appendChild(d);log.scrollTop=log.scrollHeight;return d;}
 function typeInto(el,full){el.classList.add('cursor');let i=0;const step=Math.max(1,Math.round(full.length/120));
   return new Promise(done=>{const t=setInterval(()=>{i+=step;el.textContent=full.slice(0,i);log.scrollTop=log.scrollHeight;
@@ -122,7 +129,7 @@ function addAssistant(){
 }
 async function streamReply(t,ui){
   const el=ui.wrap,det=ui.det,think=ui.think;
-  const r=await fetch('/api/chat-stream',{method:'POST',headers:{'Content-Type':'application/json'},
+  const r=await af('/api/chat-stream',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({message:t,history:history.slice(-10)})});
   const ct=(r.headers.get('content-type')||'');
   if(!r.ok||!r.body||ct.indexOf('text/event-stream')<0){
@@ -160,7 +167,7 @@ async function go(){
   const t=inp.value.trim();if(!t)return;inp.value='';inp.style.height='auto';send.disabled=true;send.classList.remove('ready');
   add(t,'user');const ui=addAssistant();
   async function agentFallback(note){
-    const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+    const r=await af('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({message:t,history:history.slice(-10)})});
     const j=await r.json();
     if(!r.ok){ui.wrap.textContent='Error: '+(j.error||r.status);}
@@ -221,7 +228,7 @@ function setPill(id,silent){
 }
 async function loadModels(){
   if(modelsLoaded)return;modelsLoaded=true;
-  try{const r=await fetch('/api/models');const j=await r.json();
+  try{const r=await af('/api/models');const j=await r.json();
     const list=j.models||[];
     if(list.length){MODELS=list.map(m=>[(m.id||m),'']);setPill(window._model,true);}
     else if(window._model)MODELS=[[window._model,'']];
@@ -272,7 +279,7 @@ function closePopup(){mpop.classList.remove('open');mpill.classList.remove('open
 async function pickModel(id){
   closePopup();setPill(id);
   st.textContent='Saving model…';
-  try{const r=await fetch('/api/agent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:id})});
+  try{const r=await af('/api/agent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:id})});
     const j=await r.json();
     if(j.ok)st.textContent='Model saved (no reboot)';
     else st.textContent='Save failed: '+(j.error||r.status);
@@ -323,7 +330,15 @@ html[data-theme="dark"] .card{background:#161c26;border-color:#ffffff22}</style>
 <p><a href="/wifi">WiFi</a> · <a href="/agent">Endpoint</a> · <a href="/api/status" target="_blank">Status</a></p>
 <div class="card"><h3>Step 1 — WiFi</h3><p>Pick hotspot / router + password.</p><a class="btn" href="/wifi">Open WiFi settings</a></div>
 <div class="card"><h3>Step 2 — Agent endpoint</h3><p>OpenAI-compatible base URL + API key + model. Saving here never touches WiFi.</p><a class="btn" href="/agent">Open Agent settings</a></div>
-</div><script>(function(){var b=document.getElementById('themebtn');if(!b)return;b.addEventListener('click',function(){var h=document.documentElement;var n=h.dataset.theme==='dark'?'light':'dark';h.dataset.theme=n;try{localStorage.setItem('agent_theme',n)}catch(e){}});})();</script></body></html>
+<div class="card"><h3>Step 3 — Device password (optional, recommended)</h3><p><small id="authstate">Checking…</small></p><input id="newtok" type="password" placeholder="New device password (min 8 chars, blank = remove)" autocomplete="new-password" style="width:100%;padding:10px;border-radius:8px;border:1px solid #8888;box-sizing:border-box;font:inherit"/><div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><button id="savetok" type="button" style="padding:10px 14px;border-radius:8px;border:0;background:#0b6cff;color:#fff;font-weight:700;cursor:pointer">Save password</button><button id="logout" type="button" style="padding:10px 14px;border-radius:8px;border:0;background:#444;color:#fff;font-weight:700;cursor:pointer">Forget on this browser</button></div><div id="authmsg" style="margin-top:8px;font-size:13px"></div><p><small>Locks the API + firmware upload. Empty = open (anyone on WiFi can use it). Stored once per browser in localStorage; same password also locks ArduinoOTA.</small></p></div>
+</div><script>
+function tok(){try{return localStorage.getItem('esp32_token')||''}catch(e){return ''}}
+function ah(h){h=h||{};var t=tok();if(t)h['Authorization']='Bearer '+t;return h}
+async function refreshAuth(){try{var r=await fetch('/api/auth',{headers:ah({})});var j=await r.json();document.getElementById('authstate').textContent=j.auth_required?'Locked — API requires password.'+(tok()?' This browser has a password saved.':' This browser has NO password saved — enter it on the Chat page.'):'Open — no password set. Anyone on WiFi can use the API.';}catch(e){document.getElementById('authstate').textContent='Status unavailable.';}}
+document.getElementById('savetok').onclick=async function(){var m=document.getElementById('authmsg');m.textContent='Saving…';try{var r=await fetch('/api/auth',{method:'POST',headers:ah({'Content-Type':'application/json'}),body:JSON.stringify({token:document.getElementById('newtok').value||''})});var j=await r.json();if(!r.ok){m.textContent='Error: '+(j.error||r.status);return;}m.textContent=j.auth_required?'Saved and locked.':'Password removed — device is open.';try{if((document.getElementById('newtok').value||'').length)localStorage.setItem('esp32_token',document.getElementById('newtok').value);else localStorage.removeItem('esp32_token');}catch(e){}document.getElementById('newtok').value='';refreshAuth();}catch(e){m.textContent='Failed: '+e;}};
+document.getElementById('logout').onclick=function(){try{localStorage.removeItem('esp32_token')}catch(e){}document.getElementById('authmsg').textContent='Forgot password on this browser.';refreshAuth();};
+refreshAuth();
+</script><script>(function(){var b=document.getElementById('themebtn');if(!b)return;b.addEventListener('click',function(){var h=document.documentElement;var n=h.dataset.theme==='dark'?'light':'dark';h.dataset.theme=n;try{localStorage.setItem('agent_theme',n)}catch(e){}});})();</script></body></html>
 )rawliteral";
 
 static const char WIFI_HTML[] PROGMEM = R"rawliteral(
@@ -371,12 +386,15 @@ html[data-theme="dark"] pre{background:#ffffff0d!important;border-color:#ffffff2
 <button id="save">Save WiFi &amp; Reboot</button>
 <div id="msg"></div>
 <script>
+function tok(){try{return localStorage.getItem('esp32_token')||''}catch(e){return ''}}
+function ah(h){h=h||{};var t=tok();if(t)h['Authorization']='Bearer '+t;return h}
+async function af(u,o){o=o||{};o.headers=ah(Object.assign({},o.headers||{}));var r=await fetch(u,o);if(r.status===401){msg.textContent='Locked — enter device password on the Chat or Setup page, then retry.';throw new Error('auth');}return r}
 const $=id=>document.getElementById(id),msg=$('msg');
 let savedSsid='';
-async function load(){try{const s=await(await fetch('/api/wifi')).json();savedSsid=s.wifi_ssid||'';
+async function load(){try{const s=await(await af('/api/wifi')).json();savedSsid=s.wifi_ssid||'';
   if(savedSsid){msg.textContent='Saved network: '+savedSsid+' (leave password blank to keep it)';}}catch(e){}scan();}
 async function scan(tries){tries=tries||0;$('scan').disabled=true;const sel=$('ssid');if(!tries)sel.innerHTML='<option>Scanning…</option>';
-  try{const r=await fetch('/api/scan');const j=await r.json();
+  try{const r=await af('/api/scan');const j=await r.json();
     if(j.scanning&&!(j.networks&&j.networks.length)&&tries<6){setTimeout(()=>scan(tries+1),1500);return;}
     sel.innerHTML='';
     if(savedSsid){const o=document.createElement('option');o.value=savedSsid;o.text=savedSsid+' (saved)';sel.appendChild(o);}
@@ -386,8 +404,8 @@ async function scan(tries){tries=tries||0;$('scan').disabled=true;const sel=$('s
 $('scan').onclick=scan;
 $('save').onclick=async()=>{msg.textContent='Saving…';
   const b={ssid:$('ssid').value,password:$('pass').value};
-  const r=await fetch('/api/wifi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
-  const j=await r.json();msg.textContent=j.ok?'Saved "'+j.ssid+'". Rebooting — rejoin your normal WiFi, then open http://esp32-agent.local or the new IP.':'Error: '+(j.error||r.status);};
+  try{const r=await af('/api/wifi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+  const j=await r.json();msg.textContent=j.ok?'Saved "'+j.ssid+'". Rebooting — rejoin your normal WiFi, then open http://esp32-agent.local or the new IP.':'Error: '+(j.error||r.status);}catch(e){if(e&&e.message!=='auth')msg.textContent='Save failed: '+e;}};
 load();
 </script><script>(function(){var b=document.getElementById('themebtn');if(!b)return;b.addEventListener('click',function(){var h=document.documentElement;var n=h.dataset.theme==='dark'?'light':'dark';h.dataset.theme=n;try{localStorage.setItem('agent_theme',n)}catch(e){}});})();</script></div></body></html>
 )rawliteral";
@@ -441,16 +459,19 @@ html[data-theme="dark"] pre{background:#ffffff0d!important;border-color:#ffffff2
 <button id="save">Save agent settings (no reboot)</button>
 <div id="msg"></div>
 <script>
+function tok(){try{return localStorage.getItem('esp32_token')||''}catch(e){return ''}}
+function ah(h){h=h||{};var t=tok();if(t)h['Authorization']='Bearer '+t;return h}
+async function af(u,o){o=o||{};o.headers=ah(Object.assign({},o.headers||{}));var r=await fetch(u,o);if(r.status===401){msg.textContent='Locked — enter device password on the Chat or Setup page, then retry.';throw new Error('auth');}return r}
 const $=id=>document.getElementById(id),msg=$('msg');
-async function load(){try{const s=await(await fetch('/api/agent')).json();
+async function load(){try{const s=await(await af('/api/agent')).json();
   $('endpoint').value=s.endpoint||'';$('model').value=s.model||'deepseek/deepseek-v4.1-flash';
   if(s.api_key_masked)msg.textContent='Saved key: '+s.api_key_masked+' (leave blank to keep)';
 }catch(e){}
 load();}
 $('save').onclick=async()=>{msg.textContent='Saving…';
   const b={endpoint:$('endpoint').value,apiKey:$('key').value,model:$('model').value};
-  const r=await fetch('/api/agent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
-  const j=await r.json();msg.textContent=j.ok?'Saved. No reboot — go to <a href="/">Chat</a>.':'Error: '+(j.error||r.status);};
+  try{const r=await af('/api/agent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+  const j=await r.json();msg.textContent=j.ok?'Saved. No reboot — go to <a href="/">Chat</a>.':'Error: '+(j.error||r.status);}catch(e){if(e&&e.message!=='auth')msg.textContent='Save failed: '+e;}};
 load();
 </script><script>(function(){var b=document.getElementById('themebtn');if(!b)return;b.addEventListener('click',function(){var h=document.documentElement;var n=h.dataset.theme==='dark'?'light':'dark';h.dataset.theme=n;try{localStorage.setItem('agent_theme',n)}catch(e){}});})();</script></div></body></html>
 )rawliteral";
@@ -487,12 +508,16 @@ html[data-theme="dark"] pre{background:#ffffff0d!important;border-color:#ffffff2
 <header><h1><a href="/" style="color:inherit">Agent</a></h1><nav><a href="/">Chat</a><a href="/functions">Functions</a><a href="/docs">Docs</a><a href="/setup">Setup</a><a href="/update">Firmware</a><button id="themebtn" type="button" aria-label="Toggle dark mode" title="Toggle dark mode"><svg class="moon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg><svg class="sun" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></button></nav></header>
 <div class="wrap">
 <h2>Firmware update (OTA, no cable)</h2>
-<form method="POST" action="/update" enctype="multipart/form-data">
-<input type="file" name="firmware" accept=".bin" required/>
+<form id="otaform">
+<input id="fwfile" type="file" name="firmware" accept=".bin" required/>
 <button type="submit">Upload .bin</button></form>
+<div id="otamsg" style="margin-top:8px;font-size:13px"></div>
 <p><small>Build with <code>pio run</code> then upload <code>.pio/build/esp32dev/firmware.bin</code> here.
-Or use ArduinoOTA: <code>pio run --target upload --upload-port &lt;ESP_IP&gt;</code></small></p>
-</div><script>(function(){var b=document.getElementById('themebtn');if(!b)return;b.addEventListener('click',function(){var h=document.documentElement;var n=h.dataset.theme==='dark'?'light':'dark';h.dataset.theme=n;try{localStorage.setItem('agent_theme',n)}catch(e){}});})();</script></body></html>
+Or use ArduinoOTA: <code>pio run --target upload --upload-port &lt;ESP_IP&gt;</code> (uses device password when set).</small></p>
+</div><script>
+function tok(){try{return localStorage.getItem('esp32_token')||''}catch(e){return ''}}
+document.getElementById('otaform').onsubmit=async function(e){e.preventDefault();var m=document.getElementById('otamsg');var f=document.getElementById('fwfile').files[0];if(!f){m.textContent='Choose a .bin file first.';return;}m.textContent='Uploading…';try{var fd=new FormData();fd.append('firmware',f,f.name);var h={};var t=tok();if(t)h['Authorization']='Bearer '+t;var r=await fetch('/update',{method:'POST',headers:h,body:fd});var txt=await r.text();m.textContent=r.ok?txt+' Rebooting…':'Error '+(r.status+': '+txt);}catch(err){m.textContent='Upload failed: '+err;}};
+</script><script>(function(){var b=document.getElementById('themebtn');if(!b)return;b.addEventListener('click',function(){var h=document.documentElement;var n=h.dataset.theme==='dark'?'light':'dark';h.dataset.theme=n;try{localStorage.setItem('agent_theme',n)}catch(e){}});})();</script></body></html>
 )rawliteral";
 
 static const char FUNCS_HTML[] PROGMEM = R"rawliteral(
@@ -540,25 +565,28 @@ html[data-theme="dark"] pre{background:#ffffff0d!important;border-color:#ffffff2
 <button id="clrMem" type="button">Clear memory</button> <button id="clrLog" type="button">Clear chat log</button>
 <div id="memmsg" style="margin-top:8px;font-size:13px"></div></div>
 <script>
+function tok(){try{return localStorage.getItem('esp32_token')||''}catch(e){return ''}}
+function ah(h){h=h||{};var t=tok();if(t)h['Authorization']='Bearer '+t;return h}
+async function af(u,o){o=o||{};o.headers=ah(Object.assign({},o.headers||{}));var r=await fetch(u,o);if(r.status===401){document.getElementById('msg').textContent='Locked — enter device password on the Chat or Setup page, then retry.';throw new Error('auth');}return r}
 const DESCR={get_status:'Heap, uptime, WiFi, IP',gpio_write:'Digital out (safe pins)',gpio_read:'Digital in',adc_read:'Analog (32,33,34,35,36,39)',wifi_scan:'Scan networks (~2s)',mem_save:'Save a memory fact',mem_read:'Read memory facts',restart_device:'Restart (needs confirm)',blink:'Blink a pin N times',web_fetch:'Fetch a web page as text'};
-async function load(){const j=await(await fetch('/api/tools')).json();
+async function load(){const j=await(await af('/api/tools')).json();
   const box=document.getElementById('list');box.innerHTML='';
   (j.tools||[]).forEach(t=>{const l=document.createElement('label');
-    l.innerHTML='<input type="checkbox" '+(t.enabled?'checked':'')+' data-n="'+t.name+'"/><span><b>'+t.name+'</b><br/><small>'+(DESCR[t.name]||'')+'</small></span>';
+    l.innerHTML='<input type="checkbox" '+(t.enabled?'checked':'')+' data-n="'+t.name+'"/><span><b>'+t.name+'</b>'+(t.label?' — '+t.label:'')+'<br/><small>'+((t.description||DESCR[t.name])||'')+'</small></span>';
     box.appendChild(l);});}
 document.getElementById('all').onclick=()=>document.querySelectorAll('input[data-n]').forEach(c=>c.checked=true);
 document.getElementById('none').onclick=()=>document.querySelectorAll('input[data-n]').forEach(c=>c.checked=false);
 document.getElementById('save').onclick=async()=>{const en=[...document.querySelectorAll('input[data-n]:checked')].map(c=>c.dataset.n);
-  const r=await fetch('/api/tools',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:en})});
-  const j=await r.json();document.getElementById('msg').textContent=j.ok?'Saved '+en.length+' enabled. System prompt now lists only these.':'Error '+(j.error||r.status);};
-async function loadMem(){try{const j=await(await fetch('/api/memory')).json();
+  try{const r=await af('/api/tools',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:en})});
+  const j=await r.json();document.getElementById('msg').textContent=j.ok?'Saved '+en.length+' enabled. System prompt now lists only these.':'Error '+(j.error||r.status);}catch(e){if(e&&e.message!=='auth')document.getElementById('msg').textContent='Save failed: '+e;}};
+async function loadMem(){try{const j=await(await af('/api/memory')).json();
   document.getElementById('mem').textContent=(j.memory||'(empty)')+'\n— '+(j.log_bytes||0)+'B chat log';}catch(e){document.getElementById('mem').textContent='(load failed)';}};
 async function clearMem(kind){const mm=document.getElementById('memmsg');
   const what=kind==='clear_memory'?'saved memory facts':'chat log';
   if(!confirm('Clear '+what+'? This cannot be undone.'))return;
   mm.textContent='Clearing…';
   const b={};b[kind]=true;
-  try{const r=await fetch('/api/memory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+  try{const r=await af('/api/memory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
   const j=await r.json();mm.textContent=j.ok?('Cleared '+what+'.'):('Error '+(j.error||r.status));loadMem();}catch(e){mm.textContent='Failed: '+e;}};
 document.getElementById('clrMem').onclick=()=>clearMem('clear_memory');
 document.getElementById('clrLog').onclick=()=>clearMem('clear_log');

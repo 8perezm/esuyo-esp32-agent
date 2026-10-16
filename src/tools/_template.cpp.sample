@@ -1,0 +1,48 @@
+// HOW TO ADD A TOOL (copy this file to tool_mything.cpp):
+//
+//   1. Copy this file -> src/tools/tool_mything.cpp  (.cpp, not .sample)
+//   2. Fill in the 3 marked spots: NAME (x2), SCHEMA, RUN.
+//   3. Add ONE line to registry.cpp:  extern const ToolDef Tool_mything;
+//      + append  &Tool_mything,  to TOOL_REGISTRY (at the END).
+//   4. `pio run` to check. Toggle it on /functions, no reboot needed.
+//
+// That's it. You don't need to read agent_tools.cpp, llm.cpp, routes.cpp,
+// or web_ui.h — schema, execution, /api/tools and /functions pick you up
+// automatically via TOOL_REGISTRY.
+//
+// Rules: keep run() fast (<few seconds), result small (<1KB JSON), and put
+// shared helpers (pin allowlists, memory) in agent_tools.h — don't copy them.
+
+#include "tool_api.h"
+
+// ---------- SPOT 1: unique name + short UI label ----------
+static const char* NAME = "mything";
+
+static void describe(JsonObject fn) {
+  // ---------- SPOT 2: what the model sees ----------
+  fn["description"] = "What my thing does, in one sentence.";
+  JsonObject p = fn["parameters"].to<JsonObject>();
+  p["type"] = "object";
+  JsonObject pr = p["properties"].to<JsonObject>();
+  // Example arg (delete if none):
+  // pr["pin"].to<JsonObject>()["type"] = "integer";
+  // JsonArray req = p["required"].to<JsonArray>();
+  // req.add("pin");
+  // No-arg tools still need the two lines below (empty object):
+  //   (keep p["type"] + p["properties"] as above, skip "required")
+}
+
+static String run(JsonObject args) {
+  // ---------- SPOT 3: what runs on the ESP32 ----------
+  // args holds the parsed model args (may be empty). Return small JSON.
+  // Example: read args with defaults:  int pin = args["pin"] | 2;
+  (void)args;
+  JsonDocument out;
+  out["ok"] = true;
+  String s;
+  serializeJson(out, s);
+  return s;
+}
+
+// Leave this line as-is (just rename the variable to match registry.cpp).
+extern const ToolDef Tool_mything = { NAME, "One-line label for /functions", describe, run, 1200 };

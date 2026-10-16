@@ -1,4 +1,5 @@
 #include "config.h"
+#include "agent_tools.h"
 
 const char* AP_SSID = "ESP32-Agent-Setup";
 const char* AP_PASS = "";  // open AP for easy onboarding
@@ -12,8 +13,9 @@ String cfgPass = "";
 String cfgEndpoint = "";   // base e.g. https://api.openai.com/v1  (or full .../chat/completions)
 String cfgApiKey = "";
 String cfgModel = "gpt-4o-mini";
+String cfgAuthToken = "";  // device password for API/UI auth; empty = open (no auth)
 
-uint32_t gToolsMask = 0x3FF;  // default all on (10 tools); restart still needs confirm=true
+uint32_t gToolsMask = 0x3FF;  // fallback; loadConfig() recomputes all-on from TOOL_COUNT
 
 void loadConfig() {
   prefs.begin(PREFS_NS, true);
@@ -23,9 +25,18 @@ void loadConfig() {
   cfgApiKey = prefs.getString("api_key", "");
   cfgModel = prefs.getString("api_model", "gpt-4o-mini");
   if (cfgModel.length() == 0) cfgModel = "gpt-4o-mini";
-  gToolsMask = prefs.getUInt("tools_mask", 0x3FF);
-  if (gToolsMask == 0) gToolsMask = 0x3FF;
-  if (gToolsMask == 0xFF || gToolsMask == 0x1FF) gToolsMask = 0x3FF;  // pre-web_fetch defaults: enable new tools too
+  cfgAuthToken = prefs.getString("auth_token", "");
+  uint32_t allOn = allToolsMask();
+  gToolsMask = prefs.getUInt("tools_mask", allOn);
+  if (gToolsMask == 0) gToolsMask = allOn;
+  else {
+    // Old "everything on" values (0xFF for 8 tools, 0x1FF for 9, ...)
+    // auto-enable newly added tools. No per-tool edit needed.
+    for (int k = 1; k < TOOL_COUNT; k++) {
+      uint32_t oldAll = (k >= 32) ? 0xFFFFFFFFUL : ((1UL << k) - 1UL);
+      if (gToolsMask == oldAll) { gToolsMask = allOn; break; }
+    }
+  }
   prefs.end();
 }
 
@@ -34,6 +45,16 @@ void saveToolsMask(uint32_t m) {
   prefs.begin(PREFS_NS, false);
   prefs.putUInt("tools_mask", m);
   prefs.end();
+}
+
+void saveAuthToken(const String& token) {
+  String t = token;
+  t.trim();
+  if (t.length() > 128) t = t.substring(0, 128);
+  prefs.begin(PREFS_NS, false);
+  prefs.putString("auth_token", t);
+  prefs.end();
+  cfgAuthToken = t;
 }
 
 void saveConfig(const String& ssid, const String& pass,
