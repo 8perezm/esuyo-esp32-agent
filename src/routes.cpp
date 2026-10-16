@@ -137,19 +137,45 @@ void handleSaveMemory() {
 }
 
 void handleScan() {
-  int n = WiFi.scanNetworks();
-  JsonDocument d;
-  JsonArray arr = d["networks"].to<JsonArray>();
-  for (int i = 0; i < n && i < 30; i++) {
-    JsonObject o = arr.add<JsonObject>();
-    o["ssid"] = WiFi.SSID(i);
-    o["rssi"] = WiFi.RSSI(i);
-    o["secure"] = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
+  // Non-blocking: async scan + 30s cache. A blocking scanNetworks() here
+  // wedged server.handleClient() for ~7s (measured), stalling every other
+  // page. Now we never block: return cache or 202 while scanning.
+  static String sCache = "";
+  static unsigned long sCacheAt = 0;
+  unsigned long now = millis();
+  server.sendHeader("Connection", "close");
+  server.sendHeader("Cache-Control", "no-store");
+  if (sCache.length() && (now - sCacheAt) < 30000) {
+    server.send(200, "application/json", sCache);
+    return;
   }
-  d["count"] = n;
-  WiFi.scanDelete();
-  String s; serializeJson(d, s);
-  server.send(200, "application/json", s);
+  int st = WiFi.scanComplete();
+  if (st == WIFI_SCAN_RUNNING) {
+    if (sCache.length()) { server.send(200, "application/json", sCache); return; }
+    server.send(202, "application/json", "{\"scanning\":true,\"networks\":[]}");
+    return;
+  }
+  if (st >= 0) {
+    // Scan finished — build response from results, cache it, free buffers.
+    JsonDocument d;
+    JsonArray arr = d["networks"].to<JsonArray>();
+    for (int i = 0; i < st && i < 30; i++) {
+      JsonObject o = arr.add<JsonObject>();
+      o["ssid"] = WiFi.SSID(i);
+      o["rssi"] = WiFi.RSSI(i);
+      o["secure"] = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
+    }
+    d["count"] = st;
+    WiFi.scanDelete();
+    String s; serializeJson(d, s);
+    sCache = s; sCacheAt = now;
+    server.send(200, "application/json", s);
+    return;
+  }
+  // st == WIFI_SCAN_FAILED (no scan yet, or expired) — kick off async scan.
+  WiFi.scanNetworks(true);
+  if (sCache.length()) { server.send(200, "application/json", sCache); return; }
+  server.send(202, "application/json", "{\"scanning\":true,\"networks\":[]}");
 }
 
 void handleGetWifi() {
@@ -216,6 +242,18 @@ void handleSaveAgent() {
 // Proxies the configured endpoint's OpenAI-style model list so the browser
 // picker shows what YOUR endpoint serves (works with any provider/app).
 void handleGetModels() {
+  // Cache 5min: upstream fetch blocks loop ~4s (measured). Picker opens
+  // repeatedly while clicking pages, so serve cache instantly.
+  static String sCache = "";
+  static unsigned long sAt = 0;
+  static String sEp = "";
+  unsigned long nowM = millis();
+  server.sendHeader("Connection", "close");
+  server.sendHeader("Cache-Control", "no-store");
+  if (sCache.length() && sEp == cfgEndpoint && (nowM - sAt) < 300000) {
+    server.send(200, "application/json", sCache);
+    return;
+  }
   if (!cfgEndpoint.length()) {
     server.send(400, "application/json", "{\"error\":\"agent endpoint not configured. Open /agent.\"}");
     return;
@@ -311,6 +349,7 @@ void handleGetModels() {
   }
   out["count"] = (int)arr.size();
   String s; serializeJson(out, s);
+  sCache = s; sAt = millis(); sEp = cfgEndpoint;
   server.send(200, "application/json", s);
 }
 

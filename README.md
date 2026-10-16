@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/esp32-readme.jpg" width="800" alt="ESP32 Agent"/></p>
+
 # ESP32 Agent
 
 > A chat harness on your ESP32 — you can ask it to do things connected to the device.
@@ -9,6 +11,22 @@ That's what this project is: it gives your ESP32 ears, hands, and a memory. The 
 Use it as a starting point for you to further build your ideas "what if my plant pot could answer questions?".
 
 It's deliberately kept small so you can own it and make it yours. Flash it, play with it for ten minutes, then use it as the base for your own project, a greenhouse monitor, a garage door buddy, a classroom demo. The boring plumbing is already done, so you can spend your time on the fun part: what you want yours to do.
+
+## Screenshots
+
+<img src="docs/screenshots/chat.png" width="800" alt="Chat"/>
+
+<table>
+  <tr>
+    <td align="center"><a href="docs/screenshots/functions.png"><img src="docs/screenshots/functions.png" width="250"/><br/>Functions</a></td>
+    <td align="center"><a href="docs/screenshots/setup.png"><img src="docs/screenshots/setup.png" width="250"/><br/>Setup</a></td>
+    <td align="center"><a href="docs/screenshots/wifi.png"><img src="docs/screenshots/wifi.png" width="250"/><br/>WiFi</a></td>
+  </tr>
+  <tr>
+    <td align="center"><a href="docs/screenshots/agent.png"><img src="docs/screenshots/agent.png" width="250"/><br/>Agent</a></td>
+    <td align="center"><a href="docs/screenshots/update.png"><img src="docs/screenshots/update.png" width="250"/><br/>Firmware</a></td>
+  </tr>
+</table>
 
 ## Features
 

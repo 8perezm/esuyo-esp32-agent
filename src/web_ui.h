@@ -8,7 +8,7 @@ static const char CHAT_HTML[] PROGMEM = R"rawliteral(
 <title>Agent — Chat</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <style>
 :root{color-scheme:light dark}body{font-family:'Inter',system-ui,-apple-system,sans-serif;margin:0;display:flex;flex-direction:column;height:100vh}
 a{text-decoration:none}a:hover{text-decoration:underline}
@@ -294,11 +294,11 @@ static const char SETUP_HTML[] PROGMEM = R"rawliteral(
 <title>Agent — Setup</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <style>:root{color-scheme:light dark}body{font-family:'Inter',system-ui,-apple-system,sans-serif;margin:0}
 a{text-decoration:none}
 .card{border:1px solid #8884;border-radius:12px;padding:14px;margin-top:14px}
-a.btn{display:block;text-align:center;margin-top:8px;padding:12px;border-radius:8px;background:#0b6cff;color:#fff;font-weight:700;text-decoration:none}
+a.btn{display:inline-block;text-align:center;margin-top:4px;padding:8px 14px;border-radius:8px;background:#0b6cff;color:#fff;font-weight:600;font-size:14px;text-decoration:none}
 a.ghost{background:#444}
 header{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #8884}
 header h1{font-size:16px;margin:0;line-height:1.2}nav{white-space:nowrap}nav a{margin-left:10px;font-size:13px;line-height:1.2}
@@ -332,7 +332,7 @@ static const char WIFI_HTML[] PROGMEM = R"rawliteral(
 <title>Agent — WiFi</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <style>:root{color-scheme:light dark}body{font-family:'Inter',system-ui,-apple-system,sans-serif;margin:0}
 a{text-decoration:none}
 label{display:block;margin:12px 0 4px;font-weight:600;font-size:13px}
@@ -375,8 +375,10 @@ const $=id=>document.getElementById(id),msg=$('msg');
 let savedSsid='';
 async function load(){try{const s=await(await fetch('/api/wifi')).json();savedSsid=s.wifi_ssid||'';
   if(savedSsid){msg.textContent='Saved network: '+savedSsid+' (leave password blank to keep it)';}}catch(e){}scan();}
-async function scan(){$('scan').disabled=true;const sel=$('ssid');sel.innerHTML='<option>Scanning…</option>';
-  try{const j=await(await fetch('/api/scan')).json();sel.innerHTML='';
+async function scan(tries){tries=tries||0;$('scan').disabled=true;const sel=$('ssid');if(!tries)sel.innerHTML='<option>Scanning…</option>';
+  try{const r=await fetch('/api/scan');const j=await r.json();
+    if(j.scanning&&!(j.networks&&j.networks.length)&&tries<6){setTimeout(()=>scan(tries+1),1500);return;}
+    sel.innerHTML='';
     if(savedSsid){const o=document.createElement('option');o.value=savedSsid;o.text=savedSsid+' (saved)';sel.appendChild(o);}
     (j.networks||[]).forEach(n=>{if(n.ssid===savedSsid)return;const o=document.createElement('option');o.value=n.ssid;o.text=n.ssid+' ('+n.rssi+'dBm'+(n.secure?', secured':'')+')';sel.appendChild(o);});
     if(!sel.options.length)sel.innerHTML='<option value="">(no networks found)</option>';
@@ -396,7 +398,7 @@ static const char AGENT_HTML[] PROGMEM = R"rawliteral(
 <title>Agent — Setup</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <style>:root{color-scheme:light dark}body{font-family:'Inter',system-ui,-apple-system,sans-serif;margin:0}
 a{text-decoration:none}
 label{display:block;margin:12px 0 4px;font-weight:600;font-size:13px}
@@ -458,7 +460,7 @@ static const char UPDATE_HTML[] PROGMEM = R"rawliteral(
 <title>Agent — Firmware update</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <style>:root{color-scheme:light dark}body{font-family:'Inter',system-ui,-apple-system,sans-serif;margin:0}
 a{text-decoration:none}
 header{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #8884}
@@ -498,7 +500,7 @@ static const char FUNCS_HTML[] PROGMEM = R"rawliteral(
 <title>Agent — Functions</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <style>:root{color-scheme:light dark}body{font-family:'Inter',system-ui,-apple-system,sans-serif;margin:0}
 a{text-decoration:none}.card{border:1px solid #8884;border-radius:12px;padding:14px;margin-top:12px}
 label{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid #8882;font-size:14px}
@@ -570,7 +572,7 @@ static const char DOCS_HTML[] PROGMEM = R"rawliteral(
 <title>Agent — Docs</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <style>:root{color-scheme:light dark}body{font-family:'Inter',system-ui,-apple-system,sans-serif;margin:0}
 a{text-decoration:none}.card{border:1px solid #8884;border-radius:12px;padding:14px;margin-top:12px}
 small{opacity:.7}code{background:#8882;padding:1px 6px;border-radius:6px;font-size:12px}

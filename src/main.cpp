@@ -20,6 +20,8 @@ void setup() {
   bool ok = connectWiFi(15000);
   if (!ok) startAP();
   else { WiFi.mode(WIFI_STA); }
+  WiFi.setAutoReconnect(true);
+  WiFi.setSleep(false);  // STA responsiveness over power-save; avoids ping/page stalls
 
   if (MDNS.begin(MDNS_NAME)) {
     Serial.printf("mDNS: http://%s.local\n", MDNS_NAME);
@@ -47,5 +49,17 @@ void loop() {
   if (dnsRunning) dnsServer.processNextRequest();
   server.handleClient();
   ArduinoOTA.handle();
+  // Non-blocking STA watchdog: a brief router drop used to leave .44 dead
+  // until reboot (connectWiFi runs once at boot). Reconnect in background.
+  if (!apMode && WiFi.status() != WL_CONNECTED) {
+    static unsigned long lastRetry = 0;
+    unsigned long now = millis();
+    if (now - lastRetry > 30000) {
+      lastRetry = now;
+      Serial.println("WiFi lost, reconnecting…");
+      WiFi.disconnect(false);
+      WiFi.reconnect();
+    }
+  }
   delay(2);
 }
