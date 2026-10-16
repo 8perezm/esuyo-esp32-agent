@@ -1,0 +1,73 @@
+name: Tag version
+
+# Tags main with the next semver based on the HEAD commit message:
+#   BREAKING CHANGE: / major:  -> major
+#   feat: / feature: / minor:  -> minor
+#   anything else               -> patch
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout with tags
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version bump
+        id: version
+        run: |
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          echo "Commit message: $COMMIT_MSG"
+
+          if echo "$COMMIT_MSG" | grep -qE "BREAKING CHANGE:|^major(\([^)]*\))?:"
+          then
+            BUMP="major"
+          elif echo "$COMMIT_MSG" | grep -qE "^feat(\([^)]*\))?:|^feature(\([^)]*\))?:|^minor(\([^)]*\))?:"
+          then
+            BUMP="minor"
+          else
+            BUMP="patch"
+          fi
+
+          echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
+          echo "Version bump type: $BUMP"
+
+      - name: Compute next version
+        id: next
+        run: |
+          LATEST=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          LATEST=${LATEST#v}
+          if [ -z "$LATEST" ]; then
+            MAJOR=0; MINOR=0; PATCH=0
+          else
+            IFS=. read -r MAJOR MINOR PATCH <<< "$LATEST"
+          fi
+
+          case "${{ steps.version.outputs.bump }}" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            *) PATCH=$((PATCH + 1)) ;;
+          esac
+
+          NEXT="$MAJOR.$MINOR.$PATCH"
+          echo "version=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "Latest tag: ${LATEST:-none} -> next: $NEXT"
+
+      - name: Create and push tag
+        run: |
+          TAG="v${{ steps.next.outputs.version }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists, skipping."
+            exit 0
+          fi
+          git tag "$TAG"
+          git push origin "$TAG"
+          echo "Pushed tag $TAG"

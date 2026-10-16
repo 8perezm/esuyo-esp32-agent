@@ -4,9 +4,9 @@ Purpose: how the 10 device tools, memory, and the OpenAI-compatible tool loop wo
 
 ## Tool catalogue
 
-Defined in `src/agent_tools.cpp:8-13`. Default mask `0x3FF` enables all ten (`src/config.cpp:16`).
+Registered in `src/tools/registry.cpp` (one file per tool: `src/tools/tool_*.cpp`). Default mask is all-on (`allToolsMask()`, `src/agent_tools.h`).
 
-| Tool | Args | What it does (`src/agent_tools.cpp:405-489`) |
+| Tool | Args | What it does (see its `src/tools/tool_*.cpp`) |
 |------|------|-----------------------------------------------|
 | `get_status` | — | `{ heap, uptime_s, wifi, rssi, ip, model }`. No pins touched. |
 | `gpio_write` | `pin: int`, `level: 0\|1` | `pinMode(pin, OUTPUT)` + `digitalWrite`. Allowlist: `2,4,5,12,13,14,15,16,17,18,19,21,22,23,25,26,27,32,33`. |
@@ -17,9 +17,9 @@ Defined in `src/agent_tools.cpp:8-13`. Default mask `0x3FF` enables all ten (`sr
 | `mem_read` | — | Returns `/memory.txt` (first 2000 chars). |
 | `restart_device` | `confirm: bool` | Requires `confirm=true`; sets `gRestartPending` — reboot happens after the HTTP reply (`src/routes.cpp:354`). |
 | `blink` | `pin` (default 2), `count` (default 5), `on_ms`/`off_ms` (default 200) | Blocking blink ending LOW. Clamped: 1–20 blinks, 50–1000 ms each, ≤15 s total. Preferred over repeated `gpio_write` for blinking. |
-| `web_fetch` | `url: string` | GETs `http(s)://…` (≤512 chars), 15 s timeout, follows redirects, strips scripts/styles/tags → ≤2000 chars of plain text (`fetchWebText` + `stripHtmlToText`, `src/agent_tools.cpp:306-402`). Rejects non-HTTP URLs and empty extraction with `{ error }`. |
+| `web_fetch` | `url: string` | GETs `http(s)://…` (≤512 chars), 15 s timeout, follows redirects, strips scripts/styles/tags → ≤2000 chars of plain text (`fetchWebText` + `stripHtmlToText` in `src/tools/tool_web_fetch.cpp`). Rejects non-HTTP URLs and empty extraction with `{ error }`. |
 
-Errors are always JSON `{ "error": "…" }` (unknown tool, disallowed pin, disabled tool, over-budget skip). Tool payloads are capped at 1200 chars (2200 for `web_fetch`) before being sent back to the model (`src/agent_tools.cpp:486-488`).
+Errors are always JSON `{ "error": "…" }` (unknown tool, disallowed pin, disabled tool, over-budget skip). Tool payloads are capped per tool (`maxResultChars`: 1200, 2200 for `web_fetch`) before being sent back to the model (`execTool()`, `src/agent_tools.cpp`).
 
 ## Pin safety
 
@@ -49,12 +49,10 @@ Full implementation in `src/llm.cpp:55-235`:
 
 `callLLM()` (`src/llm.cpp:237-366`) is the older non-tool path (still used as a reference for provider-variant parsing); production chat goes through `callLLMWithTools()`.
 
-## Adding a new tool
+## Adding a new tool (one file, one line)
 
-1. Append its name to `TOOL_NAMES` in `src/agent_tools.cpp:8-13` (this bumps `TOOL_COUNT`; existing saved masks in NVS gain the new bit only via the migration line in `src/config.cpp:28` — update that line if you add an 11th tool).
-2. Add its JSON schema inside `addToolsArray()` (`src/agent_tools.cpp:176-304`), gated by `toolEnabled("name")`.
-3. Add its executor branch inside `execTool()` (`src/agent_tools.cpp:405-489`), returning a small JSON string.
-4. Mention it in the system-prompt logic if it needs special guidance (it is listed automatically).
-5. Expose/verify via `GET /api/tools` and the `/functions` page — no reboot needed to toggle it.
+1. Copy `src/tools/_template.cpp.sample` to `src/tools/tool_mything.cpp` and fill in the 3 marked spots (name, `describe()` schema, `run()` executor returning a small JSON string).
+2. In `src/tools/registry.cpp`: add the `extern const ToolDef Tool_mything;` line and append `&Tool_mything` at the END of `TOOL_REGISTRY` (order = bit in `gToolsMask`; never reorder).
+3. `pio run`. Verify via `GET /api/tools` and toggle on the `/functions` page — no reboot needed. Old "all on" masks auto-enable new tools (`src/config.cpp`); no mask edit needed.
 
-Keep executors fast (< a few seconds), small (< 1 KB result), and side-effect-explicit: anything destructive (like `restart_device`) must require an explicit confirmation arg.
+Keep executors fast (< a few seconds), small (< 1 KB result), and side-effect-explicit: anything destructive (like `restart_device`) must require an explicit confirmation arg. Shared policy (pin allowlists) stays in `src/agent_tools.cpp` — don't copy it per tool.

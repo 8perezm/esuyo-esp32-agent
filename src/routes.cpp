@@ -12,9 +12,53 @@
 #include <WiFiClientSecure.h>
 #include <Update.h>
 #include <Preferences.h>
+#include <ArduinoOTA.h>
+
+// ---- Optional token auth (empty cfgAuthToken = open, preserves first-boot UX) ----
+static bool authEnabled() {
+  if (apMode) return false;  // captive-portal setup stays open
+  return cfgAuthToken.length() > 0;
+}
+
+static bool isAuthenticated() {
+  if (!authEnabled()) return true;
+  String h = server.header("Authorization");
+  // Accept "Bearer <token>" (case-sensitive scheme, trimmed value).
+  if (h.startsWith("Bearer ")) {
+    String v = h.substring(7);
+    v.trim();
+    if (v.length() && v == cfgAuthToken) return true;
+  }
+  // Fallback for clients that can't set Authorization (some upload paths).
+  String x = server.header("X-Auth-Token");
+  x.trim();
+  if (x.length() && x == cfgAuthToken) return true;
+  return false;
+}
+
+// Sends 401 when locked and unauthenticated. Returns true when request may proceed.
+static bool requireAuth() {
+  if (isAuthenticated()) return true;
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(401, "application/json", "{\"error\":\"auth required\"}");
+  return false;
+}
 
 void handleStatus() {
+  // When locked, unauthenticated callers get a minimal probe (no ssid/ip/endpoint/model/heap).
+  if (authEnabled() && !isAuthenticated()) {
+    JsonDocument d;
+    d["ap_mode"] = apMode;
+    d["wifi_connected"] = (WiFi.status() == WL_CONNECTED);
+    d["auth_required"] = true;
+    d["endpoint_configured"] = (cfgEndpoint.length() > 0);
+    String s; serializeJson(d, s);
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(401, "application/json", s);
+    return;
+  }
   JsonDocument d;
+  d["auth_required"] = authEnabled();
   d["ap_mode"] = apMode;
   d["wifi_connected"] = (WiFi.status() == WL_CONNECTED);
   d["ssid"] = WiFi.SSID();
@@ -40,11 +84,14 @@ void handleStatus() {
 }
 
 void handleGetTools() {
+  if (!requireAuth()) return;
   JsonDocument d;
   JsonArray arr = d["tools"].to<JsonArray>();
   for (int i = 0; i < TOOL_COUNT; i++) {
     JsonObject o = arr.add<JsonObject>();
-    o["name"] = TOOL_NAMES[i];
+    o["name"] = toolNameAt(i);
+    o["label"] = toolUiHintAt(i);
+    o["description"] = toolDescriptionAt(i);
     o["enabled"] = toolEnabledIdx(i);
   }
   d["mask"] = (int)gToolsMask;
@@ -54,6 +101,7 @@ void handleGetTools() {
 }
 
 void handleSaveTools() {
+  if (!requireAuth()) return;
   if (!server.hasArg("plain")) { server.send(400, "application/json", "{\"error\":\"empty body\"}"); return; }
   JsonDocument d;
   if (deserializeJson(d, server.arg("plain"))) {
@@ -79,6 +127,7 @@ void handleSaveTools() {
 }
 
 void handleGetMemory() {
+  if (!requireAuth()) return;
   JsonDocument d;
   d["memory"] = readMemoryFacts().substring(0, 3000);
   d["fs_ok"] = gFsOk;
@@ -114,6 +163,7 @@ void handleGetMemory() {
 }
 
 void handleSaveMemory() {
+  if (!requireAuth()) return;
   if (!server.hasArg("plain")) { server.send(400, "application/json", "{\"error\":\"empty body\"}"); return; }
   JsonDocument d;
   if (deserializeJson(d, server.arg("plain"))) {
@@ -137,6 +187,7 @@ void handleSaveMemory() {
 }
 
 void handleScan() {
+  if (!requireAuth()) return;
   // Non-blocking: async scan + 30s cache. A blocking scanNetworks() here
   // wedged server.handleClient() for ~7s (measured), stalling every other
   // page. Now we never block: return cache or 202 while scanning.
@@ -179,6 +230,7 @@ void handleScan() {
 }
 
 void handleGetWifi() {
+  if (!requireAuth()) return;
   JsonDocument d;
   d["wifi_ssid"] = cfgSsid;
   String s; serializeJson(d, s);
@@ -186,6 +238,7 @@ void handleGetWifi() {
 }
 
 void handleSaveWifi() {
+  if (!requireAuth()) return;
   if (!server.hasArg("plain")) { server.send(400, "application/json", "{\"error\":\"empty body\"}"); return; }
   JsonDocument d;
   if (deserializeJson(d, server.arg("plain"))) {
@@ -209,6 +262,7 @@ void handleSaveWifi() {
 }
 
 void handleGetAgent() {
+  if (!requireAuth()) return;
   JsonDocument d;
   d["endpoint"] = cfgEndpoint;
   d["model"] = cfgModel;
@@ -218,6 +272,7 @@ void handleGetAgent() {
 }
 
 void handleSaveAgent() {
+  if (!requireAuth()) return;
   if (!server.hasArg("plain")) { server.send(400, "application/json", "{\"error\":\"empty body\"}"); return; }
   JsonDocument d;
   if (deserializeJson(d, server.arg("plain"))) {
@@ -242,6 +297,7 @@ void handleSaveAgent() {
 // Proxies the configured endpoint's OpenAI-style model list so the browser
 // picker shows what YOUR endpoint serves (works with any provider/app).
 void handleGetModels() {
+  if (!requireAuth()) return;
   // Cache 5min: upstream fetch blocks loop ~4s (measured). Picker opens
   // repeatedly while clicking pages, so serve cache instantly.
   static String sCache = "";
@@ -354,6 +410,7 @@ void handleGetModels() {
 }
 
 void handleGetConfig() {
+  if (!requireAuth()) return;
   JsonDocument d;
   d["wifi_ssid"] = cfgSsid;
   d["endpoint"] = cfgEndpoint;
@@ -364,6 +421,7 @@ void handleGetConfig() {
 }
 
 void handleSaveConfig() {
+  if (!requireAuth()) return;
   // Legacy combined endpoint — kept for compat, now safe:
   // blank password keeps saved WiFi password, blank key keeps saved API key, no WiFi wipe.
   if (!server.hasArg("plain")) { server.send(400, "application/json", "{\"error\":\"empty body\"}"); return; }
@@ -398,6 +456,7 @@ void handleSaveConfig() {
 }
 
 void handleDebugRaw() {
+  if (!requireAuth()) return;
   // Uses the ESP's saved key to hit the saved endpoint and returns the RAW upstream
   // body (truncated) so we can see the exact JSON shape without exposing the key.
   String msg = server.hasArg("message") ? server.arg("message") : "Reply with just OK";
@@ -461,6 +520,7 @@ void handleDebugRaw() {
 }
 
 void handleChat() {
+  if (!requireAuth()) return;
   if (!server.hasArg("plain")) { server.send(400, "application/json", "{\"error\":\"empty body\"}"); return; }
   JsonDocument d;
   if (deserializeJson(d, server.arg("plain"))) {
@@ -500,6 +560,7 @@ void handleChat() {
 // over a raw socket (HTTP/1.1, manual chunked decode) and forwards each delta
 // to the browser as text/event-stream. Low RAM: deltas forwarded, never buffered.
 void handleChatStream() {
+  if (!requireAuth()) return;
   if (!server.hasArg("plain")) { server.send(400, "application/json", "{\"error\":\"empty body\"}"); return; }
   JsonDocument d;
   if (deserializeJson(d, server.arg("plain"))) {
@@ -757,6 +818,7 @@ void handleChatStream() {
 }
 
 void handleReset() {
+  if (!requireAuth()) return;
   server.send(200, "application/json", "{\"ok\":true,\"rebooting\":true}");
   delay(500);
   if (gFsOk) { LittleFS.remove(LOG_PATH); LittleFS.remove(MEM_PATH); }
@@ -766,7 +828,49 @@ void handleReset() {
   ESP.restart();
 }
 
+void handleGetAuth() {
+  JsonDocument d;
+  d["auth_required"] = authEnabled();
+  d["ap_mode"] = apMode;
+  String s; serializeJson(d, s);
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/json", s);
+}
+
+void handleSaveAuth() {
+  if (!server.hasArg("plain")) { server.send(400, "application/json", "{\"error\":\"empty body\"}"); return; }
+  // First-set (no token yet, or AP setup) is open so onboarding stays easy.
+  // Changing/clearing an existing token requires the current token.
+  if (authEnabled() && !isAuthenticated()) {
+    server.send(401, "application/json", "{\"error\":\"auth required\"}");
+    return;
+  }
+  JsonDocument d;
+  if (deserializeJson(d, server.arg("plain"))) {
+    server.send(400, "application/json", "{\"error\":\"invalid JSON\"}"); return;
+  }
+  String nt = String((const char*)(d["token"] | ""));
+  nt.trim();
+  if (nt.length() && nt.length() < 8) {
+    server.send(400, "application/json", "{\"error\":\"token too short (min 8 chars)\"}");
+    return;
+  }
+  if (nt.length() > 128) nt = nt.substring(0, 128);
+  saveAuthToken(nt);
+  // Keep ArduinoOTA in sync so `pio --upload-port <IP>` needs the same password.
+  if (nt.length()) ArduinoOTA.setPassword(nt.c_str());
+  else ArduinoOTA.setPassword("");
+  Serial.printf("[auth] token %s\n", nt.length() ? "set" : "cleared");
+  JsonDocument out;
+  out["ok"] = true;
+  out["auth_required"] = authEnabled();
+  String s; serializeJson(out, s);
+  server.send(200, "application/json", s);
+}
+
 void setupRoutes() {
+  static const char* hdrs[] = {"Authorization", "X-Auth-Token"};
+  server.collectHeaders(hdrs, 2);
   server.on("/", HTTP_GET, [] {
     if (apMode && cfgSsid.length() == 0) {  // fresh device -> straight to WiFi screen
       server.sendHeader("Location", "/wifi");
@@ -782,6 +886,8 @@ void setupRoutes() {
   server.on("/functions", HTTP_GET, [] { server.send_P(200, "text/html", FUNCS_HTML); });
   server.on("/docs", HTTP_GET, [] { server.send_P(200, "text/html", DOCS_HTML); });
   server.on("/api/status", HTTP_GET, handleStatus);
+  server.on("/api/auth", HTTP_GET, handleGetAuth);
+  server.on("/api/auth", HTTP_POST, handleSaveAuth);
   server.on("/api/scan", HTTP_GET, handleScan);
   server.on("/api/wifi", HTTP_GET, handleGetWifi);
   server.on("/api/wifi", HTTP_POST, handleSaveWifi);
@@ -798,22 +904,41 @@ void setupRoutes() {
   server.on("/api/memory", HTTP_GET, handleGetMemory);
   server.on("/api/memory", HTTP_POST, handleSaveMemory);
   server.on("/api/reset", HTTP_POST, handleReset);
-  // HTTP OTA upload (browser .bin upload, no cable)
+  // HTTP OTA upload (browser .bin upload, no cable). Gated by token when set.
+  // Note: plain <form> POSTs can't set headers, so the UI uploads via fetch()
+  // with Authorization; X-Auth-Token is also accepted for other clients.
+  // Auth is checked directly from request headers in both callbacks (no flag:
+  // a stale flag would let an empty POST through to ESP.restart()).
   server.on("/update", HTTP_POST,
     [] {
-      bool ok = !Update.hasError();
-      server.send(ok ? 200 : 500, "text/plain", ok ? "OK - rebooting..." : "FAIL");
+      if (!isAuthenticated()) {
+        server.send(401, "text/plain", "auth required");
+        return;
+      }
+      // Only reboot after a real firmware was written. The old code rebooted
+      // on ANY POST (even empty), so anyone on LAN could reboot the device.
+      if (!Update.isFinished() || Update.hasError()) {
+        server.send(500, "text/plain", "FAIL");
+        return;
+      }
+      server.send(200, "text/plain", "OK - rebooting...");
       delay(500);
       ESP.restart();
     },
     [] {
       HTTPUpload& up = server.upload();
       if (up.status == UPLOAD_FILE_START) {
+        if (!isAuthenticated()) {
+          Serial.println("OTA rejected: auth required");
+          return;
+        }
         Serial.printf("OTA start: %s\n", up.filename.c_str());
         if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Serial.println("Update.begin failed");
       } else if (up.status == UPLOAD_FILE_WRITE) {
+        if (!isAuthenticated()) return;
         if (Update.write(up.buf, up.currentSize) != up.currentSize) Serial.println("Update.write failed");
       } else if (up.status == UPLOAD_FILE_END) {
+        if (!isAuthenticated()) return;
         if (Update.end(true)) Serial.printf("OTA done: %u bytes\n", up.totalSize);
         else Serial.println("Update.end failed");
       }

@@ -16,11 +16,13 @@ extern String cfgPass;
 extern String cfgEndpoint;
 extern String cfgApiKey;
 extern String cfgModel;
+extern String cfgAuthToken;
 
 extern uint32_t gToolsMask;
 
 void loadConfig();
 void saveToolsMask(uint32_t m);
+void saveAuthToken(const String& token);
 void saveConfig(const String& ssid, const String& pass,
                 const String& endpoint, const String& key, const String& model);
 void saveWifiOnly(const String& ssid, const String& pass);

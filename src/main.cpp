@@ -30,7 +30,9 @@ void setup() {
 
   // ArduinoOTA — enables `pio run --target upload --upload-port <IP>` (no button, no cable).
   ArduinoOTA.setHostname(MDNS_NAME);
-  // ArduinoOTA.setPassword("changeme");  // optional: uncomment to lock OTA
+  if (cfgAuthToken.length()) ArduinoOTA.setPassword(cfgAuthToken.c_str());
+  // When token is empty OTA stays open (first-boot UX); setting a device
+  // password via POST /api/auth also locks ArduinoOTA to the same password.
   ArduinoOTA.onStart([] { Serial.println("OTA start"); });
   ArduinoOTA.onEnd([] { Serial.println("OTA end"); });
   ArduinoOTA.onError([](ota_error_t e) { Serial.printf("OTA error %u\n", e); });

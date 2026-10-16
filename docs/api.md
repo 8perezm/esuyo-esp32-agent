@@ -4,6 +4,15 @@ Purpose: complete contract for every page and JSON endpoint served by the ESP32,
 
 Base URL is `http://<ESP_IP>` in STA mode or `http://192.168.4.1` in AP setup mode. `http://esp32-agent.local` works wherever mDNS resolves. All JSON APIs use `application/json`; POST bodies are JSON in the request `plain` arg.
 
+## Auth (optional token, `src/routes.cpp`)
+
+Empty token = open (first-boot UX). Set a token via `POST /api/auth` or Setup → Step 3; the browser stores it in `localStorage['esp32_token']` and sends `Authorization: Bearer <token>` (`X-Auth-Token` also accepted). When set (STA mode only; AP setup stays open):
+
+- Every `/api/*` except `GET /api/auth` and `GET /api/status` requires the header, else `401 {"error":"auth required"}`.
+- `GET /api/status` without auth returns minimal `401 { ap_mode, wifi_connected, auth_required:true, endpoint_configured }` (no ssid/ip/endpoint/model/heap). With auth it returns the full snapshot plus `auth_required:true`.
+- `POST /update` (browser OTA) and ArduinoOTA require the same password.
+- Token rules: min 8 chars, max 128 (truncated), blank clears. Still plaintext HTTP on LAN — stops casual abuse, not sniffing.
+
 ## Pages (HTML)
 
 | Page | Handler | Notes |
@@ -65,8 +74,14 @@ Example:
 ```powershell
 curl -X POST http://esp32-agent.local/api/chat `
   -H "Content-Type: application/json" `
+  -H "Authorization: Bearer <device-password>" `
   -d '{"message":"what is your heap and IP?"}'
 ```
+
+## Auth endpoints
+
+- `GET /api/auth` (always open) → `{ "auth_required": false, "ap_mode": false }`.
+- `POST /api/auth` `{ "token": "new-password-min-8" }` → `{ "ok": true, "auth_required": true }`. First set is open; changing/clearing requires current `Authorization`. Blank `token` removes the password (device becomes open).
 
 ## Tools and memory
 
