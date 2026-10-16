@@ -8,6 +8,8 @@ name: Tag version
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
 
 permissions:
   contents: write

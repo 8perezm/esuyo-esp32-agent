@@ -51,6 +51,8 @@ Full implementation in `src/llm.cpp:55-235`:
 
 ## Adding a new tool (one file, one line)
 
+> New here? Start with the friendly walkthrough: [`adding-a-tool.md`](./adding-a-tool.md).
+
 1. Copy `src/tools/_template.cpp.sample` to `src/tools/tool_mything.cpp` and fill in the 3 marked spots (name, `describe()` schema, `run()` executor returning a small JSON string).
 2. In `src/tools/registry.cpp`: add the `extern const ToolDef Tool_mything;` line and append `&Tool_mything` at the END of `TOOL_REGISTRY` (order = bit in `gToolsMask`; never reorder).
 3. `pio run`. Verify via `GET /api/tools` and toggle on the `/functions` page — no reboot needed. Old "all on" masks auto-enable new tools (`src/config.cpp`); no mask edit needed.
